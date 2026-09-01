@@ -58,6 +58,7 @@ function WonDetailModal({ wonId, onClose }) {
       toast.success("WON record updated")
       qc.invalidateQueries({ queryKey: ["won-detail", wonId] })
       qc.invalidateQueries({ queryKey: ["won-records"] })
+      qc.invalidateQueries({ queryKey: ["won-stats"] })
       setEditing(false)
     }
   })

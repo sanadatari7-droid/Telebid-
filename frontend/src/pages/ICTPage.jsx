@@ -39,6 +39,7 @@ export default function ICTPage() {
       await ictApi.create({ ...form, bid_id:Number(form.bid_id), ict_cat_id:Number(form.ict_cat_id), estimated_value:form.estimated_value?Number(form.estimated_value):null, project_duration_days:form.project_duration_days?Number(form.project_duration_days):null })
       toast.success("ICT project created")
       qc.invalidateQueries({ queryKey:["ict"] })
+      qc.invalidateQueries({ queryKey:["ict-stats"] })
       setShowCreate(false); setForm(INITIAL_FORM)
     } catch(e) { toast.error(apiErrorMessage(e, "Failed")) }
     finally { setCreating(false) }

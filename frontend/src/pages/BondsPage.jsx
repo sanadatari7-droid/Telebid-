@@ -34,7 +34,7 @@ function BondModal({ bond, onClose }) {
     mutationFn: () => isNew
       ? bondsApi.create({...form, opp_id:Number(form.opp_id), bond_amount:form.bond_amount?Number(form.bond_amount):null})
       : bondsApi.update(bond.bond_id, {...form, bond_amount:form.bond_amount?Number(form.bond_amount):null}),
-    onSuccess: () => { toast.success(isNew?"Bond created":"Bond updated"); qc.invalidateQueries({queryKey:["bonds"]}); onClose() }
+    onSuccess: () => { toast.success(isNew?"Bond created":"Bond updated"); qc.invalidateQueries({queryKey:["bonds"]}); qc.invalidateQueries({queryKey:["bond-stats"]}); onClose() }
   })
 
   return (
@@ -114,11 +114,11 @@ export default function BondsPage() {
 
   const approveMut = useMutation({
     mutationFn: id => bondsApi.approve(id),
-    onSuccess: () => { toast.success("Bond approved & issued"); qc.invalidateQueries({queryKey:["bonds"]}) }
+    onSuccess: () => { toast.success("Bond approved & issued"); qc.invalidateQueries({queryKey:["bonds"]}); qc.invalidateQueries({queryKey:["bond-stats"]}) }
   })
   const deleteMut = useMutation({
     mutationFn: id => bondsApi.delete(id),
-    onSuccess: () => { toast.success("Deleted"); qc.invalidateQueries({queryKey:["bonds"]}) }
+    onSuccess: () => { toast.success("Deleted"); qc.invalidateQueries({queryKey:["bonds"]}); qc.invalidateQueries({queryKey:["bond-stats"]}) }
   })
 
   const KPI = [

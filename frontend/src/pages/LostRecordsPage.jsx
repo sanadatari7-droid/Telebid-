@@ -23,7 +23,7 @@ function LostDetailModal({ lostId, onClose }) {
   React.useEffect(()=>{ if(lost&&!editing) setForm({ loss_reason:lost.loss_reason||"", competitor_name:lost.competitor_name||"", winner_name:lost.winner_name||"", winner_tcv:lost.winner_tcv||"", winner_solution:lost.winner_solution||"", price_difference:lost.price_difference||"", technical_gap:lost.technical_gap||"", lessons_learned:lost.lessons_learned||"", bid_person_notes:lost.bid_person_notes||"", could_revisit:!!lost.could_revisit, revisit_notes:lost.revisit_notes||"" }) }, [lost,editing])
   const updateMut = useMutation({
     mutationFn:()=>lostRecordsApi.update(lostId,{...form,winner_tcv:form.winner_tcv?Number(form.winner_tcv):null,price_difference:form.price_difference?Number(form.price_difference):null,could_revisit:!!form.could_revisit}),
-    onSuccess:()=>{toast.success("Updated");qc.invalidateQueries({queryKey:["lost-detail",lostId]});qc.invalidateQueries({queryKey:["lost-records"]});setEditing(false)}
+    onSuccess:()=>{toast.success("Updated");qc.invalidateQueries({queryKey:["lost-detail",lostId]});qc.invalidateQueries({queryKey:["lost-records"]});qc.invalidateQueries({queryKey:["lost-stats"]});setEditing(false)}
   })
   const sym = lost?.symbol||"$"
   return (
