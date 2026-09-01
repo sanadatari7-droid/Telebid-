@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { oppsV2Api, settingsApi, usersApi, serviceCatsApi, wonRecordsApi } from "../services/api"
 import { exportToExcel } from "../utils/exportUtils"
@@ -1337,12 +1338,23 @@ function CreateModal({ onClose }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function OpportunitiesV2Page() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "")
   const [showCreate, setShowCreate] = useState(false)
   const [showDetail, setShowDetail] = useState(null)
   const [showRefConfig, setShowRefConfig] = useState(false)
+
+  // Dashboard "Quick Actions" land here with ?new=true (jump into the create wizard)
+  // and/or ?status=WON|LOST (pre-filter the list) — apply them once, then clean the URL.
+  useEffect(() => {
+    if (searchParams.has("new")) setShowCreate(true)
+    if (searchParams.has("new") || searchParams.has("status") || searchParams.has("type")) {
+      setSearchParams(p => { p.delete("new"); p.delete("status"); p.delete("type"); return p }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { data, isLoading } = useQuery({
     queryKey: ["opps-v2", page, search, statusFilter],

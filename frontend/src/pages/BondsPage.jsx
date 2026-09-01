@@ -1,4 +1,5 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { bondsApi, oppsV2Api } from "../services/api"
 import { fmt } from "../utils/fmt"
@@ -90,10 +91,19 @@ function BondModal({ bond, onClose }) {
 
 export default function BondsPage() {
   const qc = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [showCreate, setShowCreate] = useState(false)
   const [editBond, setEditBond] = useState(null)
   const [typeFilter, setTypeFilter] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
+
+  // Dashboard "Quick Actions" link here with ?new=true to jump straight into creating a bond.
+  useEffect(() => {
+    if (searchParams.get("new") === "true") {
+      setShowCreate(true)
+      setSearchParams(p => { p.delete("new"); return p }, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   const { data: bonds = [], isLoading } = useQuery({
     queryKey:["bonds", typeFilter, statusFilter],
