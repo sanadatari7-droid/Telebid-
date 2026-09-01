@@ -118,6 +118,8 @@ export const oppsV2Api = {
   upcomingDeadlines:        days => api.get("/opportunities-v2/deadlines/upcoming", { params: { days } }),
   overdueDeadlines:         () => api.get("/opportunities-v2/deadlines/overdue"),
   triggerBondReminder:      id => api.post(`/opportunities-v2/${id}/trigger-bond-reminder`),
+  getAiRecommendation:      id => api.get(`/opportunities-v2/${id}/ai-recommendation`),
+  generateAiRecommendation: id => api.post(`/opportunities-v2/${id}/ai-recommendation`),
 }
 
 // ── VENDORS ───────────────────────────────────────────────────────────────────

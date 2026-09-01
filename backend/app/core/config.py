@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     MAX_FAILED_LOGINS: int = 5
     BCRYPT_ROUNDS: int = 12
     CORS_ORIGINS: List[str] = ["http://localhost:5173","http://127.0.0.1:5173","http://localhost:3000","http://127.0.0.1:3000","https://*.vercel.app","https://*.railway.app"]
+    # Optional: enables the AI Bid/No-Bid Advisor (app/services/ai_advisor.py).
+    # Leave blank to run without it — the endpoints degrade to a clear
+    # "not configured" response instead of failing.
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-opus-5"
 
     class Config:
         env_file = ".env"

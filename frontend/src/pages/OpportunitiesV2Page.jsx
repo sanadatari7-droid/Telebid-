@@ -11,7 +11,8 @@ import {
   Plus, Search, Trophy, XCircle, Clock, CheckCircle2, FileText, AlertCircle,
   Download, Eye, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw,
   Users, MessageSquare, Settings2, Microscope, UserCheck, X, Send,
-  Check, MoreHorizontal, Trash2, Reply, Lock, Calendar, User, Building2, Bell
+  Check, MoreHorizontal, Trash2, Reply, Lock, Calendar, User, Building2, Bell,
+  Sparkles, ThumbsUp, ThumbsDown, HelpCircle
 } from "lucide-react"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ const INITIAL_FORM = {
   sales_rep_id:"", presales_id:"", bid_manager_id:"",
   presales_comments:"", sales_comments:"", bid_comments:"", finance_comments:"",
   rfp_issue_date:"", questions_deadline:"", submission_deadline:"", expected_award_date:"",
-  bond_required:false, manager_id:"",
+  bond_required:false, manager_id:"", expro_required:false,
 }
 
 // ── Employee Selector ─────────────────────────────────────────────────────────
@@ -441,6 +442,101 @@ function FeasibilityPanel({ oppId }) {
   )
 }
 
+// ── AI Bid/No-Bid Advisor ────────────────────────────────────────────────────
+const AI_REC_STYLE = {
+  BID:             { icon: ThumbsUp,   badge: "badge-green", label: "BID" },
+  NO_BID:          { icon: ThumbsDown, badge: "badge-red",   label: "NO-BID" },
+  CONDITIONAL_BID: { icon: HelpCircle, badge: "badge-amber", label: "CONDITIONAL BID" },
+}
+
+function AiAdvisorPanel({ oppId }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ["opp-ai-recommendation", oppId],
+    queryFn: () => oppsV2Api.getAiRecommendation(oppId).then(r => r.data),
+  })
+  const genMut = useMutation({
+    mutationFn: () => oppsV2Api.generateAiRecommendation(oppId),
+    onSuccess: () => { toast.success("AI recommendation generated"); qc.invalidateQueries({ queryKey: ["opp-ai-recommendation", oppId] }) },
+    // No onError toast here — the global axios interceptor (services/api.js)
+    // already shows one for every non-401 error response; adding another
+    // here would just double it up, as it does on a couple of older
+    // mutations elsewhere in this file.
+  })
+
+  if (isLoading) return <div className="space-y-3">{[1,2].map(i=><div key={i} className="skeleton h-16"/>)}</div>
+
+  if (!data?.available) {
+    return (
+      <div className="card-sm text-center py-10">
+        <Sparkles size={28} className="mx-auto mb-3 text-gray-300"/>
+        <p className="font-medium text-sm text-gray-600">AI Advisor not configured</p>
+        <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+          Set ANTHROPIC_API_KEY in the backend environment to enable AI-generated
+          bid/no-bid recommendations for opportunities.
+        </p>
+      </div>
+    )
+  }
+
+  const rec = data.latest
+  const style = rec ? (AI_REC_STYLE[rec.recommendation] || AI_REC_STYLE.CONDITIONAL_BID) : null
+  let strengths = [], risks = []
+  try { strengths = rec?.key_strengths ? JSON.parse(rec.key_strengths) : [] } catch { /* noop */ }
+  try { risks = rec?.key_risks ? JSON.parse(rec.key_risks) : [] } catch { /* noop */ }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <Sparkles size={15} className="text-primary-600"/> AI Bid/No-Bid Advisor
+        </div>
+        <button className="btn-secondary btn-sm" disabled={genMut.isPending} onClick={()=>genMut.mutate()}>
+          {genMut.isPending ? "Analyzing…" : rec ? "Regenerate" : "Generate Recommendation"}
+        </button>
+      </div>
+
+      {!rec && !genMut.isPending && (
+        <div className="card-sm text-center py-10 text-gray-400">
+          <Sparkles size={28} className="mx-auto mb-3 opacity-30"/>
+          <p className="text-sm">No recommendation generated yet for this opportunity.</p>
+        </div>
+      )}
+
+      {rec && (
+        <div className="card-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <span className={clsx("badge text-sm flex items-center gap-1.5", style.badge)}>
+              <style.icon size={14}/> {style.label}
+            </span>
+            <span className="text-xs text-gray-400">{rec.confidence}% confidence</span>
+          </div>
+          <p className="text-sm text-gray-700">{rec.reasoning}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1.5">Strengths</div>
+              <ul className="space-y-1">
+                {strengths.map((s,i)=><li key={i} className="text-xs text-gray-600 flex gap-1.5"><span className="text-green-500">+</span>{s}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-1.5">Risks</div>
+              <ul className="space-y-1">
+                {risks.map((s,i)=><li key={i} className="text-xs text-gray-600 flex gap-1.5"><span className="text-red-500">−</span>{s}</li>)}
+              </ul>
+            </div>
+          </div>
+          <div className="text-[11px] text-gray-400 pt-2 border-t">
+            Generated by {rec.model_used || "AI"} on {fmt(rec.created_at, "dd MMM yyyy HH:mm")}
+            {rec.generated_by_name ? ` · requested by ${rec.generated_by_name}` : ""}
+            {" — "}advisory only, not a substitute for human review.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Ref Config Modal ──────────────────────────────────────────────────────────
 function RefConfigModal({ onClose }) {
   const qc = useQueryClient()
@@ -620,6 +716,7 @@ function DetailModal({ oppId, onClose }) {
     { id:"feasibility", label:"Feasibility", icon: Microscope },
     { id:"questions", label:`Questions${opp?.questions_open>0?` (${opp.questions_open})`:opp?.questions_count>0?` (${opp.questions_count})`:""}`, icon: MessageSquare },
     { id:"approvals", label:"Approvals", icon: CheckCircle2 },
+    { id:"ai", label:"AI Advisor", icon: Sparkles },
     { id:"log", label:"Log", icon: Clock },
   ]
 
@@ -635,6 +732,7 @@ function DetailModal({ oppId, onClose }) {
                 {opp?.customer_ref && <span className="badge-indigo font-mono text-xs">{opp.customer_ref}</span>}
                 <span className={clsx("badge text-xs",STATUS_STYLE[opp?.status]||"badge-gray")}>{opp?.status?.replace(/_/g," ")}</span>
                 {opp?.is_strategic && <span className="badge-amber">⭐ Strategic</span>}
+                {opp?.expro_required && <span className="badge-purple">EXPRO Required</span>}
               </div>
               <h2 className="font-bold text-gray-900 text-lg mt-1">{opp?.customer_name}</h2>
               {opp?.customer_name_ar && <p className="text-sm text-gray-400" dir="rtl">{opp.customer_name_ar}</p>}
@@ -831,6 +929,8 @@ function DetailModal({ oppId, onClose }) {
                 </div>
               )}
 
+              {activeTab === "ai" && <AiAdvisorPanel oppId={oppId}/>}
+
               {activeTab === "log" && (
                 <div className="space-y-1">
                   {detail?.logs?.length === 0 ? <div className="text-sm text-gray-400 text-center py-8">No activity yet</div>
@@ -1008,6 +1108,7 @@ function CreateModal({ onClose }) {
         bid_manager_id: form.bid_manager_id ? Number(form.bid_manager_id) : null,
         bond_required: !!form.bond_required,
         manager_id: form.manager_id ? Number(form.manager_id) : null,
+        expro_required: !!form.expro_required,
         currency_id: Number(form.currency_id)||1,
         quantity: Number(form.quantity)||1,
         bandwidth_mbps: form.bandwidth_mbps ? Number(form.bandwidth_mbps) : null,
@@ -1309,6 +1410,30 @@ function CreateModal({ onClose }) {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* ── EXPRO / AUTHORITY APPROVAL QUESTION ────────────────── */}
+              <div className="card-sm border-purple-100 bg-purple-50/50">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-bold text-gray-900">Does this need EXPRO / authority approval?</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      If yes, the opportunity cannot be marked WON until an EXPRO log linked to it
+                      has been submitted and approved. Toggle off if this tender doesn't go through
+                      an authority review.
+                    </div>
+                  </div>
+                  <label className="flex-shrink-0 flex items-center gap-2 cursor-pointer">
+                    <span className="text-sm font-semibold text-gray-700">{form.expro_required?"Yes":"No"}</span>
+                    <button type="button"
+                      onClick={()=>setForm(p=>({...p,expro_required:!p.expro_required}))}
+                      className={clsx("relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none",
+                        form.expro_required?"bg-purple-500":"bg-gray-200")}>
+                      <span className={clsx("absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200",
+                        form.expro_required?"translate-x-6":"translate-x-0.5")}/>
+                    </button>
+                  </label>
+                </div>
               </div>
 
               <div><label className="label">General Description</label><textarea name="description" className="input" rows={3} value={form.description} onChange={fc}/></div>

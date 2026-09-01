@@ -9,6 +9,24 @@ import os, uuid, aiofiles
 
 router = APIRouter(prefix="/bids", tags=["Bids"])
 
+# Allowed forward/lateral transitions per status_code. Any status can move to
+# CANCELLED (except the two terminal ones). Missing a mapping here previously
+# let PATCH /{bid_id}/status set ANY status_id from ANY status with no check,
+# so a bid could jump DRAFT->AWARDED or bounce back out of a terminal state.
+BID_STATUS_TRANSITIONS = {
+    "DRAFT":             ["PENDING_APPROVAL", "CANCELLED"],
+    "PENDING_APPROVAL":  ["APPROVED", "DRAFT", "CANCELLED"],
+    "APPROVED":          ["PUBLISHED", "CANCELLED"],
+    "PUBLISHED":         ["OPEN", "CANCELLED"],
+    "OPEN":              ["CLOSED", "CANCELLED"],
+    "CLOSED":            ["TECH_EVAL", "CANCELLED"],
+    "TECH_EVAL":         ["FIN_EVAL", "CANCELLED"],
+    "FIN_EVAL":          ["AWARDED", "CANCELLED"],
+    "AWARDED":           ["ARCHIVED"],
+    "CANCELLED":         [],
+    "ARCHIVED":          [],
+}
+
 class BidCreate(BaseModel):
     bid_title: str
     bid_type_id: int
@@ -170,13 +188,27 @@ async def get_bid(bid_id:int, conn=Depends(get_db), current_user=Depends(get_cur
 
 @router.patch("/{bid_id}/status")
 async def update_status(bid_id:int, body:dict, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    old = await fetch_val(conn, "SELECT status_id FROM bids WHERE bid_id=$1", bid_id)
+    from fastapi import HTTPException
+    old = await fetch_one(conn,
+        "SELECT b.status_id, bs.status_code FROM bids b JOIN bid_statuses bs ON b.status_id=bs.status_id WHERE b.bid_id=$1",
+        bid_id)
+    if not old:
+        raise HTTPException(status_code=404, detail="Bid not found")
+    new_status = await fetch_one(conn, "SELECT status_id, status_code FROM bid_statuses WHERE status_id=$1", body.get("status_id"))
+    if not new_status:
+        raise HTTPException(status_code=400, detail="Invalid status_id")
+    if new_status["status_code"] != old["status_code"]:
+        allowed_next = BID_STATUS_TRANSITIONS.get(old["status_code"], [])
+        if new_status["status_code"] not in allowed_next:
+            raise HTTPException(status_code=400,
+                detail=f"Invalid transition: {old['status_code']} -> {new_status['status_code']}. "
+                       f"Allowed next: {', '.join(allowed_next) or 'none (terminal status)'}")
     await execute(conn,
         "UPDATE bids SET status_id=$1,updated_by=$2,updated_at=NOW() WHERE bid_id=$3",
         body["status_id"], current_user.user_id, bid_id)
     await execute(conn,
         "INSERT INTO audit_logs (user_id,username,action,module,record_id,record_type,old_value,new_value) VALUES ($1,$2,'STATUS_CHANGE','BIDS',$3,'BID',$4,$5)",
-        current_user.user_id, current_user.username, bid_id, str(old), str(body["status_id"]))
+        current_user.user_id, current_user.username, bid_id, old["status_code"], new_status["status_code"])
     return {"message": "Status updated"}
 
 @router.post("/{bid_id}/approve")

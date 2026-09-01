@@ -1441,3 +1441,33 @@ ALTER TABLE employees
 
 -- Ensure admin has OTP disabled by default (enable after configuring SMTP)
 UPDATE users SET otp_enabled=FALSE WHERE username='admin';
+
+-- ============================================================
+-- EXPRO / AUTHORITY APPROVAL — CONFIGURABLE GATE
+-- source_expro (above) only ever recorded that EXPRO applied; nothing
+-- enforced it, so a tender could reach WON with no approved EXPRO log.
+-- expro_required makes the authority stage an explicit, per-opportunity
+-- toggle (never assumed) that mark_won checks before allowing an award.
+-- ============================================================
+ALTER TABLE opportunities_v2
+    ADD COLUMN IF NOT EXISTS expro_required BOOLEAN DEFAULT FALSE;
+
+-- ============================================================
+-- AI BID/NO-BID ADVISOR
+-- One row per generated recommendation (kept, not overwritten, so the
+-- history of what the AI advised — and when — is auditable alongside the
+-- human decision actually made on the opportunity).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS opp_ai_insights (
+    insight_id      SERIAL PRIMARY KEY,
+    opp_id          INT NOT NULL REFERENCES opportunities_v2(opp_id),
+    recommendation  VARCHAR(20) NOT NULL,   -- BID, NO_BID, CONDITIONAL_BID
+    confidence      INT,                    -- 0-100
+    key_strengths   TEXT,                   -- JSON-encoded string list
+    key_risks       TEXT,                   -- JSON-encoded string list
+    reasoning       TEXT,
+    model_used      VARCHAR(50),
+    generated_by    INT REFERENCES users(user_id),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_opp_ai_insights_opp ON opp_ai_insights(opp_id, created_at DESC);

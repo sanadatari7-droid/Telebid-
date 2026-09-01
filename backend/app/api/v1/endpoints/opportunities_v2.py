@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List
 from datetime import datetime, date
+import json
 from pydantic import BaseModel, validator
 from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
@@ -61,6 +62,30 @@ class OppCreate(BaseModel):
     expected_award_date: Optional[date] = None
     bond_required: bool = False
     manager_id: Optional[int] = None
+    expro_required: bool = False
+
+    # Compared on .date() throughout — questions_deadline/submission_deadline
+    # are datetimes that may or may not carry a timezone depending on what
+    # the client sends, and rfp_issue_date/expected_award_date are plain
+    # dates; comparing calendar dates sidesteps naive/aware mismatches and
+    # is all a logical-order sanity check needs.
+    @validator("questions_deadline")
+    def _questions_after_issue(cls, v, values):
+        if v and values.get("rfp_issue_date") and v.date() < values["rfp_issue_date"]:
+            raise ValueError("questions_deadline cannot be before rfp_issue_date")
+        return v
+
+    @validator("submission_deadline")
+    def _submission_after_questions(cls, v, values):
+        if v and values.get("questions_deadline") and v.date() < values["questions_deadline"].date():
+            raise ValueError("submission_deadline cannot be before questions_deadline")
+        return v
+
+    @validator("expected_award_date")
+    def _award_after_submission(cls, v, values):
+        if v and values.get("submission_deadline") and v < values["submission_deadline"].date():
+            raise ValueError("expected_award_date cannot be before submission_deadline")
+        return v
 
 class ApprovalDecision(BaseModel):
     decision: str
@@ -255,14 +280,14 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
             presales_comments, sales_comments, bid_comments, finance_comments,
             rfp_issue_date, questions_deadline, submission_deadline, expected_award_date,
             source_single, service_type, service_cat_l1, service_cat_l2,
-            bond_required, manager_id,
+            bond_required, manager_id, expro_required,
             customer_ref, status, phase, created_by, company_id
         ) VALUES (
             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
             $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
             $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,
-            $42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,
-            'DRAFT','Draft',$53,1
+            $42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,
+            'DRAFT','Draft',$54,1
         )""",
         opp_number, body.expro_ref, body.rfp_ref, body.customer_name, body.customer_name_ar,
         body.customer_id, body.customer_type, body.is_strategic,
@@ -276,7 +301,7 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
         body.presales_comments, body.sales_comments, body.bid_comments, body.finance_comments,
         body.rfp_issue_date, body.questions_deadline, body.submission_deadline, body.expected_award_date,
         body.source_single, body.service_type, body.service_cat_l1, body.service_cat_l2,
-        body.bond_required, body.manager_id,
+        body.bond_required, body.manager_id, body.expro_required,
         customer_ref, current_user.user_id)
     opp_id = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_number=$1", opp_number)
     # Create deadline records
@@ -419,7 +444,7 @@ async def update_opp(opp_id: int, body: dict, conn=Depends(get_db), current_user
                "nrc","mrc","tcv","currency_id","project_size",
                "description","sow_detail","location_text","attachment_url","notes",
                "sales_rep_id","presales_id","bid_manager_id",
-               "rfp_issue_date","questions_deadline","submission_deadline","expected_award_date","bond_required","manager_id","bond_reminder_sent",
+               "rfp_issue_date","questions_deadline","submission_deadline","expected_award_date","bond_required","manager_id","bond_reminder_sent","expro_required",
                "presales_comments","sales_comments","bid_comments","finance_comments","phase"]
     updates = ["updated_at=NOW()", f"updated_by={current_user.user_id}"]
     args = []
@@ -458,12 +483,21 @@ async def submit_opp(opp_id: int, conn=Depends(get_db), current_user=Depends(get
     return {"message": "Submitted for approval"}
 
 @router.post("/{opp_id}/approve/{level}")
-async def approve_opp(opp_id: int, level: int, body: ApprovalDecision, conn=Depends(get_db), current_user=Depends(get_current_user)):
+async def approve_opp(opp_id: int, level: int, body: ApprovalDecision, conn=Depends(get_db),
+    current_user=Depends(require_roles("ADMIN","DEPT_MANAGER","DIRECTOR"))):
     if level not in [1, 2, 3]: raise HTTPException(status_code=400, detail="Level must be 1, 2, or 3")
     opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1", opp_id)
     if not opp: raise HTTPException(status_code=404)
     if opp["status"] != f"PENDING_L{level}":
         raise HTTPException(status_code=400, detail=f"Opportunity is not in PENDING_L{level} status")
+    # Maker-checker: the person who created the opportunity should not also
+    # approve it. ADMIN is exempted as a deliberate override (small teams
+    # without a separate approver) but the override is audit-logged.
+    self_approval = opp.get("created_by") == current_user.user_id
+    if self_approval and "ADMIN" not in current_user.roles:
+        raise HTTPException(status_code=403,
+            detail="Maker-checker violation: you created this opportunity and cannot also approve it. "
+                   "Ask another approver to review it.")
     await execute(conn,
         "UPDATE opportunity_approvals SET status=$1, approver_id=$2, approver_name=$3, approver_position=$4, comments=$5, decided_at=NOW(), is_locked=TRUE WHERE opp_id=$6 AND approval_level=$7",
         body.decision, current_user.user_id, current_user.full_name, ", ".join(current_user.roles), body.comments, opp_id, level)
@@ -478,11 +512,26 @@ async def approve_opp(opp_id: int, level: int, body: ApprovalDecision, conn=Depe
     else:
         next_status = "CHANGES_REQUESTED"
     await execute(conn, "UPDATE opportunities_v2 SET status=$1, updated_at=NOW() WHERE opp_id=$2", next_status, opp_id)
-    await _log(conn, opp_id, f"LEVEL_{level}_{body.decision}", current_user.user_id, comments=body.comments)
+    log_comments = body.comments
+    if self_approval:
+        log_comments = f"[SELF-APPROVAL OVERRIDE by ADMIN] {body.comments or ''}".strip()
+    await _log(conn, opp_id, f"LEVEL_{level}_{body.decision}", current_user.user_id, comments=log_comments)
     return {"message": f"Level {level} decision: {body.decision}", "new_status": next_status}
 
 @router.post("/{opp_id}/won")
 async def mark_won(opp_id: int, body: WonRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    opp = await fetch_one(conn, "SELECT expro_required FROM opportunities_v2 WHERE opp_id=$1", opp_id)
+    if not opp: raise HTTPException(status_code=404)
+    if opp["expro_required"]:
+        expro_approved = await fetch_val(conn, """
+            SELECT COUNT(*) FROM expro_logs el
+            JOIN bids b ON el.bid_id=b.bid_id
+            WHERE b.opp_id=$1 AND el.status='APPROVED'""", opp_id)
+        if not expro_approved:
+            raise HTTPException(status_code=400,
+                detail="This opportunity requires EXPRO/authority approval before it can be marked WON, "
+                       "and no approved EXPRO log was found for it. Submit and get an EXPRO log approved first, "
+                       "or clear the 'EXPRO required' flag if it no longer applies.")
     await execute(conn,
         "UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, order_summary=$3, tcv=COALESCE($4,tcv), updated_at=NOW() WHERE opp_id=$5",
         body.won_date, body.order_number, body.order_summary, body.tcv, opp_id)
@@ -496,6 +545,57 @@ async def mark_lost(opp_id: int, body: LostRecord, conn=Depends(get_db), current
         body.lost_date, body.loss_reason, body.loss_type, body.competitor_name, body.winner_name, body.winner_tcv, opp_id)
     await _log(conn, opp_id, "MARKED_LOST", current_user.user_id, comments=body.comments or body.loss_reason)
     return {"message": "Marked LOST"}
+
+# ── AI Bid/No-Bid Advisor ────────────────────────────────────────────────────
+
+@router.get("/{opp_id}/ai-recommendation")
+async def get_ai_recommendation(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """Latest stored AI recommendation for this opportunity, if one has been generated."""
+    from app.services import ai_advisor
+    latest = await fetch_one(conn, """
+        SELECT ai.*, u.full_name AS generated_by_name FROM opp_ai_insights ai
+        LEFT JOIN users u ON ai.generated_by=u.user_id
+        WHERE ai.opp_id=$1 ORDER BY ai.created_at DESC LIMIT 1""", opp_id)
+    return {"available": ai_advisor.is_configured(), "latest": latest}
+
+@router.post("/{opp_id}/ai-recommendation")
+async def generate_ai_recommendation(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """Generates a fresh AI bid/no-bid recommendation and stores it (does not overwrite prior runs)."""
+    from app.services import ai_advisor
+    if not ai_advisor.is_configured():
+        raise HTTPException(status_code=503,
+            detail="AI advisor is not configured on this server. Set ANTHROPIC_API_KEY in the backend environment to enable it.")
+    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1 AND is_deleted=FALSE", opp_id)
+    if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    customer_stats = await fetch_one(conn, """
+        SELECT COUNT(*) FILTER (WHERE status='WON') AS won, COUNT(*) FILTER (WHERE status IN ('WON','LOST')) AS total
+        FROM opportunities_v2 WHERE customer_name=$1 AND opp_id != $2 AND is_deleted=FALSE""",
+        opp["customer_name"], opp_id)
+    service_stats = await fetch_one(conn, """
+        SELECT COUNT(*) FILTER (WHERE status='WON') AS won, COUNT(*) FILTER (WHERE status IN ('WON','LOST')) AS total
+        FROM opportunities_v2 WHERE service_type=$1 AND opp_id != $2 AND is_deleted=FALSE""",
+        opp["service_type"], opp_id) if opp["service_type"] else {"won": 0, "total": 0}
+    history = {
+        "customer_won": customer_stats["won"] or 0, "customer_total": customer_stats["total"] or 0,
+        "service_won": service_stats["won"] or 0, "service_total": service_stats["total"] or 0,
+    }
+
+    try:
+        result = await ai_advisor.generate_recommendation(dict(opp), history)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI advisor call failed: {e}")
+
+    from app.core.config import settings
+    row = await fetch_one(conn, """
+        INSERT INTO opp_ai_insights (opp_id, recommendation, confidence, key_strengths, key_risks, reasoning, model_used, generated_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *""",
+        opp_id, result["recommendation"], result["confidence"],
+        json.dumps(result["key_strengths"]), json.dumps(result["key_risks"]),
+        result["reasoning"], settings.ANTHROPIC_MODEL, current_user.user_id)
+    await _log(conn, opp_id, "AI_RECOMMENDATION_GENERATED", current_user.user_id,
+        comments=f"{result['recommendation']} ({result['confidence']}% confidence)")
+    return {"available": True, "latest": row}
 
 # ── Team Members ──────────────────────────────────────────────────────────────
 

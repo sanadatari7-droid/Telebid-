@@ -73,11 +73,21 @@ async def get_template(tmpl_id: int, conn=Depends(get_db), current_user=Depends(
 @router.post("/templates/{tmpl_id}/criteria", status_code=201)
 async def add_criterion(tmpl_id: int, body: CriterionCreate, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN","PROCUREMENT"))):
+    # Scoring (submit_evaluation / evaluation_results below) sums
+    # score * weight/100 across ALL criteria in the template regardless of
+    # crit_type — there's no separate technical/financial split applied on
+    # top. So the 100% cap must be on the template's total weight, not per
+    # crit_type: capping TECHNICAL and FINANCIAL at 100% independently let a
+    # template reach 200% of achievable score, double-counting every vendor's
+    # ranking. This mirrors the checklist rule that technical + financial
+    # weight must equal 100%, generalized to however many crit_types exist.
     total_weight = await fetch_val(conn,
-        "SELECT COALESCE(SUM(weight),0) FROM evaluation_criteria WHERE tmpl_id=$1 AND crit_type=$2",
-        tmpl_id, body.crit_type)
+        "SELECT COALESCE(SUM(weight),0) FROM evaluation_criteria WHERE tmpl_id=$1",
+        tmpl_id)
     if float(total_weight) + body.weight > 100:
-        raise HTTPException(status_code=400, detail=f"Total {body.crit_type} weight cannot exceed 100%")
+        raise HTTPException(status_code=400,
+            detail=f"Total weight across all criteria (technical + financial + compliance) cannot exceed 100%. "
+                   f"Currently at {float(total_weight)}%, adding {body.weight}% would exceed the limit.")
     await execute(conn,
         """INSERT INTO evaluation_criteria (tmpl_id,crit_name,crit_type,weight,max_score,description,sort_order)
            VALUES ($1,$2,$3,$4,$5,$6,$7)""",

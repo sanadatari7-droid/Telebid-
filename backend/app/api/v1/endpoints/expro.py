@@ -116,6 +116,11 @@ async def get_log(log_id: int, conn=Depends(get_db), current_user=Depends(get_cu
 
 @router.patch("/logs/{log_id}/submit")
 async def submit_log(log_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    current = await fetch_val(conn, "SELECT status FROM expro_logs WHERE expro_log_id=$1", log_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="EXPRO log not found")
+    if current != "DRAFT":
+        raise HTTPException(status_code=400, detail=f"Only DRAFT logs can be submitted (current status: {current})")
     # Check required fields
     required = await fetch_all(conn,
         "SELECT field_key, field_label FROM expro_field_definitions WHERE company_id=1 AND is_required=TRUE AND is_active=TRUE")
@@ -133,6 +138,11 @@ async def submit_log(log_id: int, conn=Depends(get_db), current_user=Depends(get
 @router.patch("/logs/{log_id}/review")
 async def review_log(log_id: int, body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN","DIRECTOR"))):
+    current = await fetch_val(conn, "SELECT status FROM expro_logs WHERE expro_log_id=$1", log_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="EXPRO log not found")
+    if current != "SUBMITTED":
+        raise HTTPException(status_code=400, detail=f"Only SUBMITTED logs can be reviewed (current status: {current})")
     status = "APPROVED" if body.get("decision") == "APPROVE" else "REJECTED"
     await execute(conn,
         "UPDATE expro_logs SET status=$1, reviewed_by=$2, reviewed_at=NOW(), notes=COALESCE($3,notes) WHERE expro_log_id=$4",
