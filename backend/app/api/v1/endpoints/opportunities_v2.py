@@ -3,7 +3,7 @@ from typing import Optional, List
 from datetime import datetime, date
 import json
 from pydantic import BaseModel, validator
-from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 from app.services.email_service import send_bid_notification
 
@@ -146,30 +146,38 @@ class RefConfigUpdate(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _gen_opp_number(conn) -> str:
+    # Globally sequential (not per-tenant) — same documented tradeoff as
+    # bid_number in bids.py: still globally unique, just won't restart at
+    # 00001 for each new tenant.
     year = datetime.now().year
     count = await fetch_val(conn, "SELECT COUNT(*) FROM opportunities_v2") or 0
     return f"OPP-{year}-{str(count+1).zfill(5)}"
+
+async def _own_opp_or_404(conn, opp_id: int, company_id: int):
+    ok = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
 
 async def _log(conn, opp_id, action, user_id, field=None, old_val=None, new_val=None, comments=None):
     await execute(conn,
         "INSERT INTO opportunity_logs (opp_id, action, field_name, old_value, new_value, performed_by, comments) VALUES ($1,$2,$3,$4,$5,$6,$7)",
         opp_id, action, field, str(old_val) if old_val else None, str(new_val) if new_val else None, user_id, comments)
 
-async def _get_emp_snapshot(conn, emp_id: int) -> dict:
+async def _get_emp_snapshot(conn, emp_id: int, company_id: int) -> dict:
     """Fetch employee profile to snapshot into team/feasibility tables."""
     emp = await fetch_one(conn, """
         SELECT e.emp_id, e.full_name, e.initials, e.job_title, e.sectors_covered,
                e.email, e.employee_type, u.full_name AS user_full_name, u.job_title AS user_title
         FROM employees e LEFT JOIN users u ON e.user_id = u.user_id
-        WHERE e.emp_id = $1 AND e.is_active = TRUE""", emp_id)
+        WHERE e.emp_id = $1 AND e.is_active = TRUE AND e.company_id = $2""", emp_id, company_id)
     return dict(emp) if emp else {}
 
-async def _build_customer_ref(conn, opp_id: int, presales_initials: str = None, customer_id: str = None,
+async def _build_customer_ref(conn, opp_id: int, company_id: int, presales_initials: str = None, customer_id: str = None,
                                 am_initials: str = None, client_initials: str = None) -> str:
     """Build customer reference from configuration — image shows:
     Company Initials - Pre-Sales Initials - AM Initials - Ref# - Client Initials - Version 1.x
     All optional checkboxes."""
-    cfg = await fetch_one(conn, "SELECT * FROM customer_ref_config WHERE company_id=1")
+    cfg = await fetch_one(conn, "SELECT * FROM customer_ref_config WHERE company_id=$1", company_id)
     if not cfg:
         return customer_id or ""
     parts = []
@@ -206,8 +214,9 @@ async def list_opps(
     project_size: Optional[str]=None, is_strategic: Optional[bool]=None,
     date_from: Optional[str]=None, date_to: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
-    conds = ["o.is_deleted=FALSE"]
-    args = []
+    company_id = require_company(current_user)
+    conds = ["o.is_deleted=FALSE", "o.company_id=$1"]
+    args = [company_id]
     if search:
         args.append(f"%{search}%")
         conds.append(f"(o.customer_name ILIKE ${len(args)} OR o.opp_number ILIKE ${len(args)} OR o.rfp_ref ILIKE ${len(args)} OR o.expro_ref ILIKE ${len(args)} OR o.customer_ref ILIKE ${len(args)})")
@@ -252,18 +261,19 @@ async def list_opps(
 
 @router.post("", status_code=201)
 async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     opp_number = await _gen_opp_number(conn)
     # Get presales initials for customer ref
     ps_initials = None
     if body.presales_id:
-        ps_user = await fetch_one(conn, "SELECT e.initials FROM employees e WHERE e.user_id=$1", body.presales_id)
+        ps_user = await fetch_one(conn, "SELECT e.initials FROM employees e WHERE e.user_id=$1 AND e.company_id=$2", body.presales_id, company_id)
         if ps_user:
             ps_initials = ps_user["initials"]
-    customer_ref = await _build_customer_ref(conn, 0, ps_initials, body.customer_id)
+    customer_ref = await _build_customer_ref(conn, 0, company_id, ps_initials, body.customer_id)
     # Check uniqueness
-    cfg = await fetch_one(conn, "SELECT require_unique FROM customer_ref_config WHERE company_id=1")
+    cfg = await fetch_one(conn, "SELECT require_unique FROM customer_ref_config WHERE company_id=$1", company_id)
     if cfg and cfg["require_unique"] and customer_ref:
-        existing = await fetch_val(conn, "SELECT COUNT(*) FROM opportunities_v2 WHERE customer_ref=$1", customer_ref)
+        existing = await fetch_val(conn, "SELECT COUNT(*) FROM opportunities_v2 WHERE customer_ref=$1 AND company_id=$2", customer_ref, company_id)
         if existing and existing > 0:
             raise HTTPException(status_code=400, detail=f"Customer reference '{customer_ref}' already exists")
     await execute(conn, """
@@ -287,7 +297,7 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
             $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
             $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,
             $42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,
-            'DRAFT','Draft',$54,1
+            'DRAFT','Draft',$54,$55
         )""",
         opp_number, body.expro_ref, body.rfp_ref, body.customer_name, body.customer_name_ar,
         body.customer_id, body.customer_type, body.is_strategic,
@@ -302,8 +312,8 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
         body.rfp_issue_date, body.questions_deadline, body.submission_deadline, body.expected_award_date,
         body.source_single, body.service_type, body.service_cat_l1, body.service_cat_l2,
         body.bond_required, body.manager_id, body.expro_required,
-        customer_ref, current_user.user_id)
-    opp_id = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_number=$1", opp_number)
+        customer_ref, current_user.user_id, company_id)
+    opp_id = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_number=$1 AND company_id=$2", opp_number, company_id)
     # Create deadline records
     for dtype, dlabel, ddt in [
         ("RFP_ISSUE","RFP Issue Date", body.rfp_issue_date),
@@ -318,7 +328,7 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
     # Auto-add team members from people fields
     for user_id, role in [(body.sales_rep_id,"SALES"),(body.presales_id,"PRESALES"),(body.bid_manager_id,"BID_MANAGER")]:
         if user_id:
-            emp = await fetch_one(conn, "SELECT * FROM employees WHERE user_id=$1 AND is_active=TRUE", user_id)
+            emp = await fetch_one(conn, "SELECT * FROM employees WHERE user_id=$1 AND is_active=TRUE AND company_id=$2", user_id, company_id)
             if emp:
                 try:
                     await execute(conn,
@@ -328,8 +338,8 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
                     pass
     # Init feasibility if sales+presales provided
     if body.sales_rep_id or body.presales_id:
-        sales_emp = await fetch_one(conn, "SELECT * FROM employees WHERE user_id=$1", body.sales_rep_id) if body.sales_rep_id else None
-        ps_emp = await fetch_one(conn, "SELECT * FROM employees WHERE user_id=$1", body.presales_id) if body.presales_id else None
+        sales_emp = await fetch_one(conn, "SELECT * FROM employees WHERE user_id=$1 AND company_id=$2", body.sales_rep_id, company_id) if body.sales_rep_id else None
+        ps_emp = await fetch_one(conn, "SELECT * FROM employees WHERE user_id=$1 AND company_id=$2", body.presales_id, company_id) if body.presales_id else None
         try:
             await execute(conn, """
                 INSERT INTO expro_feasibility (opp_id, sales_emp_id, sales_name, sales_initials, sales_title, sales_sectors,
@@ -356,6 +366,7 @@ async def create_opp(body: OppCreate, conn=Depends(get_db), current_user=Depends
 
 @router.get("/stats/dashboard")
 async def dashboard_stats(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     stats = await fetch_one(conn, """
         SELECT COUNT(*) AS total,
             COUNT(CASE WHEN status='DRAFT' THEN 1 END) AS draft,
@@ -372,20 +383,21 @@ async def dashboard_stats(conn=Depends(get_db), current_user=Depends(get_current
             COALESCE(SUM(tcv),0) AS total_tcv_pipeline,
             ROUND(100.0*COUNT(CASE WHEN status='WON' THEN 1 END)/NULLIF(COUNT(CASE WHEN status IN ('WON','LOST') THEN 1 END),0),1) AS win_rate,
             SUM(questions_open) AS total_open_questions
-        FROM opportunities_v2 WHERE is_deleted=FALSE""")
+        FROM opportunities_v2 WHERE is_deleted=FALSE AND company_id=$1""", company_id)
     by_family = await fetch_all(conn, """
         SELECT sf.family_name, COUNT(*) AS count, COALESCE(SUM(o.tcv),0) AS tcv
         FROM opportunities_v2 o JOIN solution_families sf ON o.family_id=sf.family_id
-        WHERE o.is_deleted=FALSE GROUP BY sf.family_name ORDER BY count DESC""")
+        WHERE o.is_deleted=FALSE AND o.company_id=$1 GROUP BY sf.family_name ORDER BY count DESC""", company_id)
     by_status = await fetch_all(conn, """
         SELECT status, COUNT(*) AS count FROM opportunities_v2
-        WHERE is_deleted=FALSE GROUP BY status ORDER BY count DESC""")
+        WHERE is_deleted=FALSE AND company_id=$1 GROUP BY status ORDER BY count DESC""", company_id)
     return {"stats": stats, "by_family": by_family, "by_status": by_status}
 
 # ── Get single opportunity ────────────────────────────────────────────────────
 
 @router.get("/{opp_id}")
 async def get_opp(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     opp = await fetch_one(conn, """
         SELECT o.*, sf.family_name, sf.family_name_ar,
                st.solution_name, c.symbol, c.currency_code,
@@ -401,7 +413,7 @@ async def get_opp(opp_id: int, conn=Depends(get_db), current_user=Depends(get_cu
         LEFT JOIN users ps ON o.presales_id=ps.user_id
         LEFT JOIN users bm ON o.bid_manager_id=bm.user_id
         LEFT JOIN users cr ON o.created_by=cr.user_id
-        WHERE o.opp_id=$1 AND o.is_deleted=FALSE""", opp_id)
+        WHERE o.opp_id=$1 AND o.is_deleted=FALSE AND o.company_id=$2""", opp_id, company_id)
     if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
     approvals = await fetch_all(conn, "SELECT * FROM opportunity_approvals WHERE opp_id=$1 ORDER BY approval_level", opp_id)
     deadlines = await fetch_all(conn, "SELECT od.*, u.full_name AS responsible_name FROM opportunity_deadlines od LEFT JOIN users u ON od.responsible_id=u.user_id WHERE od.opp_id=$1 ORDER BY od.deadline_dt", opp_id)
@@ -446,10 +458,11 @@ async def update_opp(opp_id: int, body: dict, conn=Depends(get_db), current_user
                "sales_rep_id","presales_id","bid_manager_id",
                "rfp_issue_date","questions_deadline","submission_deadline","expected_award_date","bond_required","manager_id","bond_reminder_sent","expro_required",
                "presales_comments","sales_comments","bid_comments","finance_comments","phase"]
+    company_id = require_company(current_user)
     updates = ["updated_at=NOW()", f"updated_by={current_user.user_id}"]
     args = []
-    old = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1", opp_id)
-    if not old: raise HTTPException(status_code=404)
+    old = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    if not old: raise HTTPException(status_code=404, detail="Opportunity not found")
     for k, v in body.items():
         if k in allowed:
             args.append(v); updates.append(f"{k}=${len(args)}")
@@ -462,32 +475,34 @@ async def update_opp(opp_id: int, body: dict, conn=Depends(get_db), current_user
         new_ps_id = body.get("presales_id") or old.get("presales_id")
         ps_initials = None
         if new_ps_id:
-            ps_emp = await fetch_one(conn, "SELECT initials FROM employees WHERE user_id=$1", new_ps_id)
+            ps_emp = await fetch_one(conn, "SELECT initials FROM employees WHERE user_id=$1 AND company_id=$2", new_ps_id, company_id)
             if ps_emp: ps_initials = ps_emp["initials"]
-        new_ref = await _build_customer_ref(conn, opp_id, ps_initials, new_cust_id)
+        new_ref = await _build_customer_ref(conn, opp_id, company_id, ps_initials, new_cust_id)
         args.append(new_ref); updates.append(f"customer_ref=${len(args)}")
-    args.append(opp_id)
-    await execute(conn, f"UPDATE opportunities_v2 SET {','.join(updates)} WHERE opp_id=${len(args)}", *args)
+    args.append(opp_id); args.append(company_id)
+    await execute(conn, f"UPDATE opportunities_v2 SET {','.join(updates)} WHERE opp_id=${len(args)-1} AND company_id=${len(args)}", *args)
     return {"message": "Updated"}
 
 # ── Workflow Actions ──────────────────────────────────────────────────────────
 
 @router.post("/{opp_id}/submit")
 async def submit_opp(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1", opp_id)
-    if not opp: raise HTTPException(status_code=404)
+    company_id = require_company(current_user)
+    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
     if opp["status"] != "DRAFT": raise HTTPException(status_code=400, detail="Only DRAFT opportunities can be submitted")
     await execute(conn, "INSERT INTO opportunity_approvals (opp_id, approval_level, status) VALUES ($1, 1, 'PENDING')", opp_id)
-    await execute(conn, "UPDATE opportunities_v2 SET status='PENDING_L1', updated_at=NOW() WHERE opp_id=$1", opp_id)
+    await execute(conn, "UPDATE opportunities_v2 SET status='PENDING_L1', updated_at=NOW() WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
     await _log(conn, opp_id, "SUBMITTED", current_user.user_id, comments="Submitted for Level 1 approval")
     return {"message": "Submitted for approval"}
 
 @router.post("/{opp_id}/approve/{level}")
 async def approve_opp(opp_id: int, level: int, body: ApprovalDecision, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN","DEPT_MANAGER","DIRECTOR"))):
+    company_id = require_company(current_user)
     if level not in [1, 2, 3]: raise HTTPException(status_code=400, detail="Level must be 1, 2, or 3")
-    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1", opp_id)
-    if not opp: raise HTTPException(status_code=404)
+    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
     if opp["status"] != f"PENDING_L{level}":
         raise HTTPException(status_code=400, detail=f"Opportunity is not in PENDING_L{level} status")
     # Maker-checker: the person who created the opportunity should not also
@@ -511,7 +526,7 @@ async def approve_opp(opp_id: int, level: int, body: ApprovalDecision, conn=Depe
         next_status = "DRAFT"
     else:
         next_status = "CHANGES_REQUESTED"
-    await execute(conn, "UPDATE opportunities_v2 SET status=$1, updated_at=NOW() WHERE opp_id=$2", next_status, opp_id)
+    await execute(conn, "UPDATE opportunities_v2 SET status=$1, updated_at=NOW() WHERE opp_id=$2 AND company_id=$3", next_status, opp_id, company_id)
     log_comments = body.comments
     if self_approval:
         log_comments = f"[SELF-APPROVAL OVERRIDE by ADMIN] {body.comments or ''}".strip()
@@ -520,29 +535,32 @@ async def approve_opp(opp_id: int, level: int, body: ApprovalDecision, conn=Depe
 
 @router.post("/{opp_id}/won")
 async def mark_won(opp_id: int, body: WonRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    opp = await fetch_one(conn, "SELECT expro_required FROM opportunities_v2 WHERE opp_id=$1", opp_id)
-    if not opp: raise HTTPException(status_code=404)
+    company_id = require_company(current_user)
+    opp = await fetch_one(conn, "SELECT expro_required FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
     if opp["expro_required"]:
         expro_approved = await fetch_val(conn, """
             SELECT COUNT(*) FROM expro_logs el
             JOIN bids b ON el.bid_id=b.bid_id
-            WHERE b.opp_id=$1 AND el.status='APPROVED'""", opp_id)
+            WHERE b.opp_id=$1 AND el.status='APPROVED' AND el.company_id=$2""", opp_id, company_id)
         if not expro_approved:
             raise HTTPException(status_code=400,
                 detail="This opportunity requires EXPRO/authority approval before it can be marked WON, "
                        "and no approved EXPRO log was found for it. Submit and get an EXPRO log approved first, "
                        "or clear the 'EXPRO required' flag if it no longer applies.")
     await execute(conn,
-        "UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, order_summary=$3, tcv=COALESCE($4,tcv), updated_at=NOW() WHERE opp_id=$5",
-        body.won_date, body.order_number, body.order_summary, body.tcv, opp_id)
+        "UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, order_summary=$3, tcv=COALESCE($4,tcv), updated_at=NOW() WHERE opp_id=$5 AND company_id=$6",
+        body.won_date, body.order_number, body.order_summary, body.tcv, opp_id, company_id)
     await _log(conn, opp_id, "MARKED_WON", current_user.user_id, comments=f"Order: {body.order_number}")
     return {"message": "Marked WON"}
 
 @router.post("/{opp_id}/lost")
 async def mark_lost(opp_id: int, body: LostRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     await execute(conn,
-        "UPDATE opportunities_v2 SET status='LOST', phase='Dropped', lost_date=$1, loss_reason=$2, loss_type=$3, competitor_name=$4, winner_name=$5, winner_tcv=$6, updated_at=NOW() WHERE opp_id=$7",
-        body.lost_date, body.loss_reason, body.loss_type, body.competitor_name, body.winner_name, body.winner_tcv, opp_id)
+        "UPDATE opportunities_v2 SET status='LOST', phase='Dropped', lost_date=$1, loss_reason=$2, loss_type=$3, competitor_name=$4, winner_name=$5, winner_tcv=$6, updated_at=NOW() WHERE opp_id=$7 AND company_id=$8",
+        body.lost_date, body.loss_reason, body.loss_type, body.competitor_name, body.winner_name, body.winner_tcv, opp_id, company_id)
     await _log(conn, opp_id, "MARKED_LOST", current_user.user_id, comments=body.comments or body.loss_reason)
     return {"message": "Marked LOST"}
 
@@ -552,6 +570,8 @@ async def mark_lost(opp_id: int, body: LostRecord, conn=Depends(get_db), current
 async def get_ai_recommendation(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
     """Latest stored AI recommendation for this opportunity, if one has been generated."""
     from app.services import ai_advisor
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     latest = await fetch_one(conn, """
         SELECT ai.*, u.full_name AS generated_by_name FROM opp_ai_insights ai
         LEFT JOIN users u ON ai.generated_by=u.user_id
@@ -562,20 +582,21 @@ async def get_ai_recommendation(opp_id: int, conn=Depends(get_db), current_user=
 async def generate_ai_recommendation(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
     """Generates a fresh AI bid/no-bid recommendation and stores it (does not overwrite prior runs)."""
     from app.services import ai_advisor
+    company_id = require_company(current_user)
     if not ai_advisor.is_configured():
         raise HTTPException(status_code=503,
             detail="AI advisor is not configured on this server. Set ANTHROPIC_API_KEY in the backend environment to enable it.")
-    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1 AND is_deleted=FALSE", opp_id)
+    opp = await fetch_one(conn, "SELECT * FROM opportunities_v2 WHERE opp_id=$1 AND is_deleted=FALSE AND company_id=$2", opp_id, company_id)
     if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
 
     customer_stats = await fetch_one(conn, """
         SELECT COUNT(*) FILTER (WHERE status='WON') AS won, COUNT(*) FILTER (WHERE status IN ('WON','LOST')) AS total
-        FROM opportunities_v2 WHERE customer_name=$1 AND opp_id != $2 AND is_deleted=FALSE""",
-        opp["customer_name"], opp_id)
+        FROM opportunities_v2 WHERE customer_name=$1 AND opp_id != $2 AND is_deleted=FALSE AND company_id=$3""",
+        opp["customer_name"], opp_id, company_id)
     service_stats = await fetch_one(conn, """
         SELECT COUNT(*) FILTER (WHERE status='WON') AS won, COUNT(*) FILTER (WHERE status IN ('WON','LOST')) AS total
-        FROM opportunities_v2 WHERE service_type=$1 AND opp_id != $2 AND is_deleted=FALSE""",
-        opp["service_type"], opp_id) if opp["service_type"] else {"won": 0, "total": 0}
+        FROM opportunities_v2 WHERE service_type=$1 AND opp_id != $2 AND is_deleted=FALSE AND company_id=$3""",
+        opp["service_type"], opp_id, company_id) if opp["service_type"] else {"won": 0, "total": 0}
     history = {
         "customer_won": customer_stats["won"] or 0, "customer_total": customer_stats["total"] or 0,
         "service_won": service_stats["won"] or 0, "service_total": service_stats["total"] or 0,
@@ -601,6 +622,8 @@ async def generate_ai_recommendation(opp_id: int, conn=Depends(get_db), current_
 
 @router.get("/{opp_id}/team")
 async def get_team(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     return await fetch_all(conn, """
         SELECT ot.*, e.email AS emp_email, e.employee_type, e.tech_specialty, e.employee_code
         FROM opportunity_team ot
@@ -609,7 +632,9 @@ async def get_team(opp_id: int, conn=Depends(get_db), current_user=Depends(get_c
 
 @router.post("/{opp_id}/team")
 async def add_team_member(opp_id: int, body: TeamMemberAdd, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    emp = await _get_emp_snapshot(conn, body.emp_id)
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    emp = await _get_emp_snapshot(conn, body.emp_id, company_id)
     if not emp: raise HTTPException(status_code=404, detail="Employee not found")
     try:
         await execute(conn,
@@ -627,6 +652,8 @@ async def add_team_member(opp_id: int, body: TeamMemberAdd, conn=Depends(get_db)
 
 @router.delete("/{opp_id}/team/{team_id}")
 async def remove_team_member(opp_id: int, team_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     await execute(conn, "DELETE FROM opportunity_team WHERE team_id=$1 AND opp_id=$2", team_id, opp_id)
     return {"message": "Removed"}
 
@@ -634,13 +661,17 @@ async def remove_team_member(opp_id: int, team_id: int, conn=Depends(get_db), cu
 
 @router.get("/{opp_id}/feasibility")
 async def get_feasibility(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     return await fetch_one(conn, "SELECT * FROM expro_feasibility WHERE opp_id=$1", opp_id)
 
 @router.put("/{opp_id}/feasibility")
 async def upsert_feasibility(opp_id: int, body: FeasibilityUpdate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     # Fetch employee snapshots
-    s_emp = await _get_emp_snapshot(conn, body.sales_emp_id) if body.sales_emp_id else {}
-    p_emp = await _get_emp_snapshot(conn, body.presales_emp_id) if body.presales_emp_id else {}
+    s_emp = await _get_emp_snapshot(conn, body.sales_emp_id, company_id) if body.sales_emp_id else {}
+    p_emp = await _get_emp_snapshot(conn, body.presales_emp_id, company_id) if body.presales_emp_id else {}
     await execute(conn, """
         INSERT INTO expro_feasibility (
             opp_id, sales_emp_id, sales_name, sales_initials, sales_title, sales_sectors, sales_notes,
@@ -667,6 +698,8 @@ async def upsert_feasibility(opp_id: int, body: FeasibilityUpdate, conn=Depends(
 
 @router.get("/{opp_id}/questions")
 async def list_questions(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     # Auto-mark overdue
     await execute(conn, """
         UPDATE opportunity_questions SET status='OVERDUE', updated_at=NOW()
@@ -684,6 +717,8 @@ async def list_questions(opp_id: int, conn=Depends(get_db), current_user=Depends
 
 @router.post("/{opp_id}/questions", status_code=201)
 async def add_question(opp_id: int, body: QuestionCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     await execute(conn,
         "INSERT INTO opportunity_questions (opp_id, question_text, assigned_to, deadline_dt, priority, created_by) VALUES ($1,$2,$3,$4,$5,$6)",
         opp_id, body.question_text, body.assigned_to, body.deadline_dt, body.priority, current_user.user_id)
@@ -693,6 +728,8 @@ async def add_question(opp_id: int, body: QuestionCreate, conn=Depends(get_db), 
 
 @router.patch("/{opp_id}/questions/{question_id}/answer")
 async def answer_question(opp_id: int, question_id: int, body: QuestionAnswer, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     await execute(conn,
         "UPDATE opportunity_questions SET response=$1, status='ANSWERED', responded_at=NOW(), responded_by=$2, updated_at=NOW() WHERE question_id=$3 AND opp_id=$4",
         body.response, current_user.user_id, question_id, opp_id)
@@ -701,12 +738,16 @@ async def answer_question(opp_id: int, question_id: int, body: QuestionAnswer, c
 
 @router.patch("/{opp_id}/questions/{question_id}/close")
 async def close_question(opp_id: int, question_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     await execute(conn, "UPDATE opportunity_questions SET status='CLOSED', updated_at=NOW() WHERE question_id=$1 AND opp_id=$2", question_id, opp_id)
     await _update_questions_count(conn, opp_id)
     return {"message": "Question closed"}
 
 @router.delete("/{opp_id}/questions/{question_id}")
 async def delete_question(opp_id: int, question_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
     await execute(conn, "DELETE FROM opportunity_questions WHERE question_id=$1 AND opp_id=$2", question_id, opp_id)
     await _update_questions_count(conn, opp_id)
     return {"message": "Deleted"}
@@ -715,16 +756,18 @@ async def delete_question(opp_id: int, question_id: int, conn=Depends(get_db), c
 
 @router.get("/config/customer-ref")
 async def get_ref_config(conn=Depends(get_db), current_user=Depends(get_current_user)):
-    cfg = await fetch_one(conn, "SELECT * FROM customer_ref_config WHERE company_id=1")
+    company_id = require_company(current_user)
+    cfg = await fetch_one(conn, "SELECT * FROM customer_ref_config WHERE company_id=$1", company_id)
     if not cfg:
         return {"use_company_initials":False,"use_presales_initials":True,"use_cash":False,"use_customer_id":True,"separator":"-","company_initials":"SLM","cash_label":"CASH","require_unique":True}
     return cfg
 
 @router.put("/config/customer-ref")
 async def update_ref_config(body: RefConfigUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
-    existing = await fetch_one(conn, "SELECT config_id FROM customer_ref_config WHERE company_id=1")
+    company_id = require_company(current_user)
+    existing = await fetch_one(conn, "SELECT config_id FROM customer_ref_config WHERE company_id=$1", company_id)
     if not existing:
-        await execute(conn, "INSERT INTO customer_ref_config (company_id) VALUES (1)")
+        await execute(conn, "INSERT INTO customer_ref_config (company_id) VALUES ($1)", company_id)
     allowed = ["use_company_initials","use_presales_initials","use_am_initials","use_cash","use_customer_id","use_client_initials","use_version","separator","company_initials","cash_label","version_label","ref_number_prefix","require_unique"]
     updates = ["updated_at=NOW()"]
     args = []
@@ -732,7 +775,7 @@ async def update_ref_config(body: RefConfigUpdate, conn=Depends(get_db), current
         if k in allowed:
             args.append(v); updates.append(f"{k}=${len(args)}")
     if args:
-        args.append(1)
+        args.append(company_id)
         await execute(conn, f"UPDATE customer_ref_config SET {','.join(updates)} WHERE company_id=${len(args)}", *args)
     return {"message": "Config updated"}
 
@@ -762,8 +805,9 @@ async def employees_for_selection(
     search: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
     """Returns employees formatted for dropdown selection with full name, initials, title, sectors."""
-    conds = ["e.is_active=TRUE"]
-    args = []
+    company_id = require_company(current_user)
+    conds = ["e.is_active=TRUE", "e.company_id=$1"]
+    args = [company_id]
     if role:
         args.append(role); conds.append(f"e.employee_type=${len(args)}")
     if search:
@@ -785,6 +829,7 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
     Also called automatically when bond_required is set and deadline is within 6 days.
     """
     from app.services.email_service import send_bond_reminder
+    company_id = require_company(current_user)
     opp = await fetch_one(conn, """
         SELECT o.*, bp.user_id AS bid_person_id, bp.full_name AS bid_person_name, bp.email AS bid_person_email,
                mgr.user_id AS manager_user_id, mgr.full_name AS manager_name, mgr.email AS manager_email,
@@ -792,8 +837,8 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
         FROM opportunities_v2 o
         LEFT JOIN users bp ON o.bid_manager_id = bp.user_id
         LEFT JOIN users mgr ON o.manager_id = mgr.user_id
-        WHERE o.opp_id=$1""", opp_id)
-    if not opp: raise HTTPException(status_code=404)
+        WHERE o.opp_id=$1 AND o.company_id=$2""", opp_id, company_id)
+    if not opp: raise HTTPException(status_code=404, detail="Opportunity not found")
     if not opp.get("bond_required"):
         raise HTTPException(status_code=400, detail="Bond not required for this opportunity")
 
@@ -807,10 +852,11 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
         if ok:
             sent_to.append(opp["bid_person_name"])
             await execute(conn,
-                "INSERT INTO notifications (user_id, notif_type, title, body) VALUES ($1,'BOND_REMINDER',$2,$3)",
+                "INSERT INTO notifications (user_id, notif_type, title, body, company_id) VALUES ($1,'BOND_REMINDER',$2,$3,$4)",
                 opp["bid_person_id"],
                 f"⚠️ Bond Required: {opp['opp_number']}",
-                f"Please request the bid bond for {opp['customer_name']}. Deadline in {int(days_left)} day(s).")
+                f"Please request the bid bond for {opp['customer_name']}. Deadline in {int(days_left)} day(s).",
+                company_id)
 
     if opp.get("manager_email") and opp.get("manager_user_id") != opp.get("bid_person_id"):
         ok = await send_bond_reminder(opp["manager_email"], opp["manager_name"],
@@ -818,13 +864,14 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
         if ok:
             sent_to.append(f"{opp['manager_name']} (Manager)")
             await execute(conn,
-                "INSERT INTO notifications (user_id, notif_type, title, body) VALUES ($1,'BOND_REMINDER_MGR',$2,$3)",
+                "INSERT INTO notifications (user_id, notif_type, title, body, company_id) VALUES ($1,'BOND_REMINDER_MGR',$2,$3,$4)",
                 opp["manager_user_id"],
                 f"⚠️ [Manager] Bond Required: {opp['opp_number']}",
-                f"Bond reminder for {opp['customer_name']} — {int(days_left)} day(s) to deadline.")
+                f"Bond reminder for {opp['customer_name']} — {int(days_left)} day(s) to deadline.",
+                company_id)
 
     await execute(conn,
-        "UPDATE opportunities_v2 SET bond_reminder_sent=TRUE, bond_reminder_sent_at=NOW() WHERE opp_id=$1", opp_id)
+        "UPDATE opportunities_v2 SET bond_reminder_sent=TRUE, bond_reminder_sent_at=NOW() WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
     await _log(conn, opp_id, "BOND_REMINDER_SENT", current_user.user_id, comments=f"Sent to: {', '.join(sent_to)}")
     return {"message": f"Bond reminder sent to: {', '.join(sent_to) if sent_to else 'no recipients configured'}"}
 
@@ -832,18 +879,21 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
 
 @router.get("/solutions/families")
 async def get_families(conn=Depends(get_db), current_user=Depends(get_current_user)):
-    return await fetch_all(conn, "SELECT * FROM solution_families WHERE is_active=TRUE ORDER BY sort_order")
+    company_id = require_company(current_user)
+    return await fetch_all(conn, "SELECT * FROM solution_families WHERE is_active=TRUE AND company_id=$1 ORDER BY sort_order", company_id)
 
 @router.get("/solutions/types")
 async def get_types(family_id: Optional[int]=None, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     if family_id:
-        return await fetch_all(conn, "SELECT * FROM solution_types WHERE family_id=$1 AND is_active=TRUE ORDER BY sort_order", family_id)
-    return await fetch_all(conn, "SELECT st.*, sf.family_name FROM solution_types st JOIN solution_families sf ON st.family_id=sf.family_id WHERE st.is_active=TRUE ORDER BY sf.sort_order, st.sort_order")
+        return await fetch_all(conn, "SELECT * FROM solution_types WHERE family_id=$1 AND is_active=TRUE AND company_id=$2 ORDER BY sort_order", family_id, company_id)
+    return await fetch_all(conn, "SELECT st.*, sf.family_name FROM solution_types st JOIN solution_families sf ON st.family_id=sf.family_id WHERE st.is_active=TRUE AND st.company_id=$1 ORDER BY sf.sort_order, st.sort_order", company_id)
 
 # ── Deadlines ─────────────────────────────────────────────────────────────────
 
 @router.get("/deadlines/upcoming")
 async def upcoming_deadlines(days: int=Query(7), conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_all(conn, """
         SELECT od.*, o.opp_number, o.customer_name, o.status,
                u.full_name AS responsible_name, u.email AS responsible_email,
@@ -852,11 +902,12 @@ async def upcoming_deadlines(days: int=Query(7), conn=Depends(get_db), current_u
         JOIN opportunities_v2 o ON od.opp_id=o.opp_id
         LEFT JOIN users u ON od.responsible_id=u.user_id
         WHERE od.deadline_dt BETWEEN NOW() AND NOW()+($1||' days')::INTERVAL
-          AND o.is_deleted=FALSE AND od.status='PENDING'
-        ORDER BY od.deadline_dt""", str(days))
+          AND o.is_deleted=FALSE AND od.status='PENDING' AND o.company_id=$2
+        ORDER BY od.deadline_dt""", str(days), company_id)
 
 @router.get("/deadlines/overdue")
 async def overdue_deadlines(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_all(conn, """
         SELECT od.*, o.opp_number, o.customer_name, o.status,
                EXTRACT(DAY FROM NOW()-od.deadline_dt)::INT AS days_overdue
@@ -864,5 +915,5 @@ async def overdue_deadlines(conn=Depends(get_db), current_user=Depends(get_curre
         JOIN opportunities_v2 o ON od.opp_id=o.opp_id
         WHERE od.deadline_dt < NOW() AND od.status='PENDING'
           AND o.status NOT IN ('WON','LOST','DROPPED','CANCELLED')
-          AND o.is_deleted=FALSE
-        ORDER BY od.deadline_dt""")
+          AND o.is_deleted=FALSE AND o.company_id=$1
+        ORDER BY od.deadline_dt""", company_id)

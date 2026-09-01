@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
-from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 from pydantic import BaseModel
 
@@ -23,44 +23,52 @@ class FieldDefCreate(BaseModel):
 
 @router.get("/field-definitions")
 async def get_field_defs(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_all(conn,
-        "SELECT * FROM expro_field_definitions WHERE company_id=1 AND is_active=TRUE ORDER BY sort_order")
+        "SELECT * FROM expro_field_definitions WHERE company_id=$1 AND is_active=TRUE ORDER BY sort_order", company_id)
 
 @router.post("/field-definitions")
 async def add_field_def(body: FieldDefCreate, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     await execute(conn,
         """INSERT INTO expro_field_definitions (company_id,field_key,field_label,field_label_ar,
            field_type,dropdown_key,is_required,sort_order)
-           VALUES (1,$1,$2,$3,$4,$5,$6,$7)""",
-        body.field_key, body.field_label, body.field_label_ar, body.field_type,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+        company_id, body.field_key, body.field_label, body.field_label_ar, body.field_type,
         body.dropdown_key, body.is_required, body.sort_order)
     return {"message": "Field definition added"}
 
 @router.patch("/field-definitions/{field_def_id}")
 async def update_field_def(field_def_id: int, body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     allowed = ["field_label","field_label_ar","field_type","dropdown_key","is_required","sort_order","is_active"]
     updates = []; args = []
     for k, v in body.items():
         if k in allowed:
             args.append(v); updates.append(f"{k}=${len(args)}")
-    args.append(field_def_id)
-    await execute(conn, f"UPDATE expro_field_definitions SET {','.join(updates)} WHERE field_def_id=${len(args)}", *args)
+    if not args: raise HTTPException(status_code=400, detail="No valid fields")
+    args.append(field_def_id); args.append(company_id)
+    result = await execute(conn, f"UPDATE expro_field_definitions SET {','.join(updates)} WHERE field_def_id=${len(args)-1} AND company_id=${len(args)}", *args)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Field definition not found")
     return {"message": "Field updated"}
 
 @router.delete("/field-definitions/{field_def_id}")
 async def delete_field_def(field_def_id: int, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
-    await execute(conn, "UPDATE expro_field_definitions SET is_active=FALSE WHERE field_def_id=$1", field_def_id)
+    company_id = require_company(current_user)
+    result = await execute(conn, "UPDATE expro_field_definitions SET is_active=FALSE WHERE field_def_id=$1 AND company_id=$2", field_def_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Field definition not found")
     return {"message": "Field deactivated"}
 
 @router.get("/logs")
 async def list_logs(page: int=Query(1,ge=1), page_size: int=Query(20),
     bid_id: Optional[int]=None, status: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
-    conditions = ["el.company_id=1"]
-    args = []
+    company_id = require_company(current_user)
+    conditions = ["el.company_id=$1"]
+    args = [company_id]
     if bid_id:
         args.append(bid_id); conditions.append(f"el.bid_id=${len(args)}")
     if status:
@@ -80,16 +88,20 @@ async def list_logs(page: int=Query(1,ge=1), page_size: int=Query(20),
 @router.post("/logs", status_code=201)
 async def create_log(body: ExproLogCreate, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN","PROCUREMENT"))):
+    company_id = require_company(current_user)
+    if body.bid_id:
+        bid_ok = await fetch_val(conn, "SELECT bid_id FROM bids WHERE bid_id=$1 AND company_id=$2", body.bid_id, company_id)
+        if not bid_ok: raise HTTPException(status_code=404, detail="Bid not found")
     # Generate reference
     count = await fetch_val(conn, "SELECT COUNT(*) FROM expro_logs") or 0
     from datetime import datetime
     ref = f"EXPRO-{datetime.now().year}-{str(count+1).zfill(5)}"
     await execute(conn,
-        "INSERT INTO expro_logs (bid_id, company_id, log_reference, notes, created_by) VALUES ($1,1,$2,$3,$4)",
-        body.bid_id, body.log_reference or ref, body.notes, current_user.user_id)
-    log_id = await fetch_val(conn, "SELECT expro_log_id FROM expro_logs ORDER BY created_at DESC LIMIT 1")
+        "INSERT INTO expro_logs (bid_id, company_id, log_reference, notes, created_by) VALUES ($1,$2,$3,$4,$5)",
+        body.bid_id, company_id, body.log_reference or ref, body.notes, current_user.user_id)
+    log_id = await fetch_val(conn, "SELECT expro_log_id FROM expro_logs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 1", company_id)
     # Save field values
-    field_defs = await fetch_all(conn, "SELECT * FROM expro_field_definitions WHERE company_id=1 AND is_active=TRUE")
+    field_defs = await fetch_all(conn, "SELECT * FROM expro_field_definitions WHERE company_id=$1 AND is_active=TRUE", company_id)
     for fd in field_defs:
         val = body.field_values.get(fd["field_key"])
         if val is not None:
@@ -100,13 +112,14 @@ async def create_log(body: ExproLogCreate, conn=Depends(get_db),
 
 @router.get("/logs/{log_id}")
 async def get_log(log_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     log = await fetch_one(conn, """
         SELECT el.*, b.bid_number, b.bid_title, u.full_name AS created_by_name
         FROM expro_logs el
         LEFT JOIN bids b ON el.bid_id=b.bid_id
         LEFT JOIN users u ON el.created_by=u.user_id
-        WHERE el.expro_log_id=$1""", log_id)
-    if not log: raise HTTPException(status_code=404)
+        WHERE el.expro_log_id=$1 AND el.company_id=$2""", log_id, company_id)
+    if not log: raise HTTPException(status_code=404, detail="EXPRO log not found")
     values = await fetch_all(conn, """
         SELECT elv.*, efd.field_label, efd.field_type, efd.field_label_ar
         FROM expro_log_values elv
@@ -116,14 +129,15 @@ async def get_log(log_id: int, conn=Depends(get_db), current_user=Depends(get_cu
 
 @router.patch("/logs/{log_id}/submit")
 async def submit_log(log_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    current = await fetch_val(conn, "SELECT status FROM expro_logs WHERE expro_log_id=$1", log_id)
+    company_id = require_company(current_user)
+    current = await fetch_val(conn, "SELECT status FROM expro_logs WHERE expro_log_id=$1 AND company_id=$2", log_id, company_id)
     if current is None:
         raise HTTPException(status_code=404, detail="EXPRO log not found")
     if current != "DRAFT":
         raise HTTPException(status_code=400, detail=f"Only DRAFT logs can be submitted (current status: {current})")
     # Check required fields
     required = await fetch_all(conn,
-        "SELECT field_key, field_label FROM expro_field_definitions WHERE company_id=1 AND is_required=TRUE AND is_active=TRUE")
+        "SELECT field_key, field_label FROM expro_field_definitions WHERE company_id=$1 AND is_required=TRUE AND is_active=TRUE", company_id)
     filled = await fetch_all(conn,
         "SELECT field_key FROM expro_log_values WHERE expro_log_id=$1 AND field_value IS NOT NULL AND field_value!=''", log_id)
     filled_keys = {r["field_key"] for r in filled}
@@ -131,20 +145,21 @@ async def submit_log(log_id: int, conn=Depends(get_db), current_user=Depends(get
     if missing:
         raise HTTPException(status_code=400, detail=f"Required fields missing: {', '.join(missing)}")
     await execute(conn,
-        "UPDATE expro_logs SET status='SUBMITTED', submitted_by=$1, submitted_at=NOW() WHERE expro_log_id=$2",
-        current_user.user_id, log_id)
+        "UPDATE expro_logs SET status='SUBMITTED', submitted_by=$1, submitted_at=NOW() WHERE expro_log_id=$2 AND company_id=$3",
+        current_user.user_id, log_id, company_id)
     return {"message": "EXPRO log submitted"}
 
 @router.patch("/logs/{log_id}/review")
 async def review_log(log_id: int, body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN","DIRECTOR"))):
-    current = await fetch_val(conn, "SELECT status FROM expro_logs WHERE expro_log_id=$1", log_id)
+    company_id = require_company(current_user)
+    current = await fetch_val(conn, "SELECT status FROM expro_logs WHERE expro_log_id=$1 AND company_id=$2", log_id, company_id)
     if current is None:
         raise HTTPException(status_code=404, detail="EXPRO log not found")
     if current != "SUBMITTED":
         raise HTTPException(status_code=400, detail=f"Only SUBMITTED logs can be reviewed (current status: {current})")
     status = "APPROVED" if body.get("decision") == "APPROVE" else "REJECTED"
     await execute(conn,
-        "UPDATE expro_logs SET status=$1, reviewed_by=$2, reviewed_at=NOW(), notes=COALESCE($3,notes) WHERE expro_log_id=$4",
-        status, current_user.user_id, body.get("notes"), log_id)
+        "UPDATE expro_logs SET status=$1, reviewed_by=$2, reviewed_at=NOW(), notes=COALESCE($3,notes) WHERE expro_log_id=$4 AND company_id=$5",
+        status, current_user.user_id, body.get("notes"), log_id, company_id)
     return {"message": f"EXPRO log {status.lower()}"}

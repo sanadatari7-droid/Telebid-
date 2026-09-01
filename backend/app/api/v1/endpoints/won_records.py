@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import date, datetime
 from pydantic import BaseModel, validator
-from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, CurrentUser
 
 router = APIRouter(prefix="/won-records", tags=["Won Records"])
@@ -86,6 +86,7 @@ async def create_won_from_opportunity(
     5. Updates original opportunity status to WON
     6. Creates audit log entry
     """
+    company_id = require_company(current_user)
     # 1. Validate original opportunity exists
     opp = await fetch_one(conn, """
         SELECT o.*, c.symbol, c.currency_code,
@@ -100,7 +101,7 @@ async def create_won_from_opportunity(
         LEFT JOIN users sr ON o.sales_rep_id = sr.user_id
         LEFT JOIN users ps ON o.presales_id = ps.user_id
         LEFT JOIN users bm ON o.bid_manager_id = bm.user_id
-        WHERE o.opp_id = $1 AND o.is_deleted = FALSE""", opp_id)
+        WHERE o.opp_id = $1 AND o.is_deleted = FALSE AND o.company_id = $2""", opp_id, company_id)
 
     if not opp:
         raise HTTPException(status_code=404, detail="Opportunity not found")
@@ -142,7 +143,7 @@ async def create_won_from_opportunity(
             invoice_amount, payment_terms, bid_person_notes,
             won_by, won_status
         ) VALUES (
-            $1, $2, 1,
+            $1, $2, $43,
             $3, $4, $5, $6,
             $7, $8, $9, $10,
             $11, $12, $13, $14,
@@ -169,14 +170,14 @@ async def create_won_from_opportunity(
         body.discount_applied, discount_amount, final_value,
         body.invoice_status, body.invoice_number, body.invoice_date,
         body.invoice_amount, body.payment_terms, body.bid_person_notes,
-        current_user.user_id)
+        current_user.user_id, company_id)
 
-    won_id = await fetch_val(conn, "SELECT won_id FROM won_records WHERE won_number = $1", won_number)
+    won_id = await fetch_val(conn, "SELECT won_id FROM won_records WHERE won_number = $1 AND company_id = $2", won_number, company_id)
 
     # 6. Update original opportunity status to WON (preserve all other data)
     await execute(conn,
-        "UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, updated_at=NOW(), updated_by=$3 WHERE opp_id=$4",
-        body.won_date, body.order_number, current_user.user_id, opp_id)
+        "UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, updated_at=NOW(), updated_by=$3 WHERE opp_id=$4 AND company_id=$5",
+        body.won_date, body.order_number, current_user.user_id, opp_id, company_id)
 
     # 7. Audit log
     await execute(conn,
@@ -215,8 +216,9 @@ async def list_won_records(
     conn=Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    conds = ["w.is_deleted = FALSE"]
-    args = []
+    company_id = require_company(current_user)
+    conds = ["w.is_deleted = FALSE", "w.company_id = $1"]
+    args = [company_id]
     if search:
         args.append(f"%{search}%")
         conds.append(f"(w.customer_name ILIKE ${len(args)} OR w.won_number ILIKE ${len(args)} OR w.expro_ref ILIKE ${len(args)} OR w.po_number ILIKE ${len(args)})")
@@ -251,6 +253,7 @@ async def list_won_records(
 
 @router.get("/stats")
 async def won_stats(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_one(conn, """
         SELECT
             COUNT(*) AS total,
@@ -263,11 +266,12 @@ async def won_stats(conn=Depends(get_db), current_user=Depends(get_current_user)
             COUNT(CASE WHEN invoice_status='NOT_INVOICED' THEN 1 END) AS not_invoiced,
             COALESCE(SUM(CASE WHEN invoice_status='PAID' THEN final_value END), 0) AS total_paid,
             COALESCE(SUM(CASE WHEN invoice_status != 'PAID' THEN final_value END), 0) AS total_outstanding
-        FROM won_records WHERE is_deleted = FALSE AND won_status = 'ACTIVE'""")
+        FROM won_records WHERE is_deleted = FALSE AND won_status = 'ACTIVE' AND company_id = $1""", company_id)
 
 
 @router.get("/{won_id}")
 async def get_won_record(won_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     won = await fetch_one(conn, """
         SELECT w.*,
                o.opp_number, o.status AS opp_status, o.customer_ref AS opp_customer_ref,
@@ -286,7 +290,7 @@ async def get_won_record(won_id: int, conn=Depends(get_db), current_user=Depends
         LEFT JOIN users ps ON w.presales_id = ps.user_id
         LEFT JOIN users bm ON w.bid_manager_id = bm.user_id
         LEFT JOIN users wb ON w.won_by = wb.user_id
-        WHERE w.won_id = $1 AND w.is_deleted = FALSE""", won_id)
+        WHERE w.won_id = $1 AND w.is_deleted = FALSE AND w.company_id = $2""", won_id, company_id)
     if not won:
         raise HTTPException(status_code=404, detail="WON record not found")
     # Get audit trail from opportunity
@@ -302,7 +306,8 @@ async def get_won_record(won_id: int, conn=Depends(get_db), current_user=Depends
 @router.get("/by-opportunity/{opp_id}")
 async def get_won_by_opp(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
     """Get WON record linked to a specific opportunity."""
-    won = await fetch_one(conn, "SELECT * FROM won_records WHERE opp_id = $1 AND is_deleted = FALSE", opp_id)
+    company_id = require_company(current_user)
+    won = await fetch_one(conn, "SELECT * FROM won_records WHERE opp_id = $1 AND is_deleted = FALSE AND company_id = $2", opp_id, company_id)
     return won  # Returns null if not yet won
 
 
@@ -313,7 +318,8 @@ async def update_won_record(
     conn=Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    won = await fetch_one(conn, "SELECT * FROM won_records WHERE won_id = $1", won_id)
+    company_id = require_company(current_user)
+    won = await fetch_one(conn, "SELECT * FROM won_records WHERE won_id = $1 AND company_id = $2", won_id, company_id)
     if not won: raise HTTPException(status_code=404)
 
     allowed = ["po_number","po_date","order_number","order_summary","discount_applied",
@@ -336,8 +342,8 @@ async def update_won_record(
 
     if not args:
         raise HTTPException(status_code=400, detail="Nothing to update")
-    args.append(won_id)
-    await execute(conn, f"UPDATE won_records SET {','.join(updates)} WHERE won_id=${len(args)}", *args)
+    args.append(won_id); args.append(company_id)
+    await execute(conn, f"UPDATE won_records SET {','.join(updates)} WHERE won_id=${len(args)-1} AND company_id=${len(args)}", *args)
 
     # Audit
     await execute(conn,
