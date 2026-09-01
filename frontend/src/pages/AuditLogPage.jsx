@@ -13,7 +13,10 @@ export default function AuditLogPage() {
   const [search,setSearch]=useState("")
   const {data,isLoading,refetch}=useQuery({queryKey:["audit-log",page],queryFn:()=>reportsApi.audit({page,page_size:50}).then(r=>r.data),retry:1})
   const items=data?.items||[]
-  const handleExport=()=>exportToExcel(items,[{header:"Action",key:"action"},{header:"User",key:"user_name"},{header:"Username",key:"username"},{header:"Entity",key:"entity_type"},{header:"Details",key:"details"},{header:"Time",accessor:r=>r.action_at?fmt(r.action_at,"dd MMM yyyy HH:mm"):""}],"audit-log")
+  const detailsOf = log => log.old_value || log.new_value
+    ? `${log.old_value ?? "—"} → ${log.new_value ?? "—"}`
+    : (log.record_id ? `#${log.record_id}` : "—")
+  const handleExport=()=>exportToExcel(items,[{header:"Action",key:"action"},{header:"User",key:"user_name"},{header:"Username",key:"username"},{header:"Entity",key:"record_type"},{header:"Details",accessor:detailsOf},{header:"Time",accessor:r=>r.action_at?fmt(r.action_at,"dd MMM yyyy HH:mm"):""}],"audit-log")
   const filtered=search?items.filter(i=>JSON.stringify(i).toLowerCase().includes(search.toLowerCase())):items
   return (
     <div className="p-6 max-w-screen-xl mx-auto space-y-5">
@@ -28,12 +31,12 @@ export default function AuditLogPage() {
           {isLoading?<tr><td colSpan={6} className="text-center py-10"><div className="animate-spin inline-block w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full"/></td></tr>
           :filtered.length===0?<tr><td colSpan={6} className="text-center py-10 text-sm text-gray-400">No audit records found</td></tr>
           :filtered.map((log,i)=>(
-            <tr key={log.audit_id||i}>
+            <tr key={log.log_id||i}>
               <td className="text-xs text-gray-500 whitespace-nowrap">{log.action_at?fmt(log.action_at,"dd MMM HH:mm:ss"):"—"}</td>
               <td><div className="text-sm font-semibold">{log.user_name||"System"}</div>{log.username&&<div className="text-xs text-gray-400 font-mono">{log.username}</div>}</td>
               <td><span className={clsx("badge text-xs",ACTION_STYLE[log.action]||"badge-gray")}>{log.action?.replace(/_/g," ")}</span></td>
-              <td className="text-xs text-gray-500">{log.entity_type||"—"}</td>
-              <td className="text-xs text-gray-600 max-w-[300px] truncate" title={log.details}>{log.details||"—"}</td>
+              <td className="text-xs text-gray-500">{log.record_type||log.module||"—"}</td>
+              <td className="text-xs text-gray-600 max-w-[300px] truncate" title={detailsOf(log)}>{detailsOf(log)}</td>
               <td className="text-xs font-mono text-gray-400">{log.ip_address||"—"}</td>
             </tr>
           ))}
