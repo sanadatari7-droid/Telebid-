@@ -167,7 +167,7 @@ export default function AppLayout() {
 
   const { data: unread = 0 } = useQuery({
     queryKey: ["unread-count"],
-    queryFn: () => notifApi.unreadCount().then(r => r.data?.count || 0),
+    queryFn: () => notifApi.unreadCount().then(r => r.data?.unread_count || 0),
     refetchInterval: 30000, retry: 1,
   })
 
