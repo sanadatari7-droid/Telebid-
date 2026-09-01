@@ -20,17 +20,26 @@ async def analyze_excel(file: UploadFile = File(...),
             ws = wb[sheet_name]
             headers = []
             first_data_rows = []
+            all_rows = []
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if i == 0:
                     headers = [str(h).strip() if h else f"Col_{j}" for j, h in enumerate(row)]
-                elif i <= 5 and any(cell is not None for cell in row):
-                    first_data_rows.append([str(v) if v is not None else "" for v in row])
-                if i > 5: break
+                    continue
+                if not any(cell is not None for cell in row):
+                    continue
+                str_row = [str(v) if v is not None else "" for v in row]
+                if i <= 5:
+                    first_data_rows.append(str_row)
+                # Full dataset the frontend actually submits on confirm — capped as a
+                # sanity limit, not a preview limit (sample_rows above is the preview).
+                if len(all_rows) < 2000:
+                    all_rows.append(dict(zip(headers, str_row)))
             sheets.append({
                 "name": sheet_name,
                 "headers": headers,
                 "row_count": ws.max_row,
                 "sample_rows": first_data_rows,
+                "all_rows": all_rows,
                 "suggested_mapping": _suggest_mapping(headers)
             })
         return {

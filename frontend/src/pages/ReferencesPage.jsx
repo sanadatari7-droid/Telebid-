@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { refsApi } from "../services/api"
+import { refsApi, usersApi } from "../services/api"
 import { useForm } from "react-hook-form"
 import { fmt, fmtDT } from "../utils/fmt"
 import toast from "react-hot-toast"
@@ -14,6 +14,8 @@ export default function ReferencesPage() {
   const { register, handleSubmit, reset } = useForm()
   const { data=[], isLoading } = useQuery({ queryKey:["references",search], queryFn:()=>refsApi.list({search:search||undefined}).then(r=>r.data) })
   const { data:detail } = useQuery({ queryKey:["ref",selected?.ref_id], queryFn:()=>refsApi.get(selected.ref_id).then(r=>r.data), enabled:!!selected })
+  const { data:usersData } = useQuery({ queryKey:["users-list"], queryFn:()=>usersApi.list({page_size:200}).then(r=>r.data) })
+  const userList = usersData?.items || []
   const createMut = useMutation({ mutationFn:d=>refsApi.create(d), onSuccess:()=>{ toast.success("Reference created"); qc.invalidateQueries({queryKey:["references"]}); setShowCreate(false); reset() } })
 
   return (
@@ -57,8 +59,20 @@ export default function ReferencesPage() {
               </div>
               <div><label className="label">Project Name *</label><input {...register("project_name",{required:true})} className="input"/></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Sales Rep User ID *</label><input {...register("sales_rep_id",{required:true,valueAsNumber:true})} type="number" className="input"/></div>
-                <div><label className="label">Presales Eng User ID *</label><input {...register("presales_eng_id",{required:true,valueAsNumber:true})} type="number" className="input"/></div>
+                <div>
+                  <label className="label">Sales Rep *</label>
+                  <select {...register("sales_rep_id",{required:true,valueAsNumber:true})} className="input">
+                    <option value="">Select…</option>
+                    {userList.map(u=><option key={u.user_id} value={u.user_id}>{u.full_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Presales Engineer *</label>
+                  <select {...register("presales_eng_id",{required:true,valueAsNumber:true})} className="input">
+                    <option value="">Select…</option>
+                    {userList.map(u=><option key={u.user_id} value={u.user_id}>{u.full_name}</option>)}
+                  </select>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div><label className="label">Value</label><input {...register("project_value",{valueAsNumber:true})} type="number" className="input"/></div>

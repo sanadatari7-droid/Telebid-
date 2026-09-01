@@ -72,8 +72,8 @@ export const bidsApi = {
   getApprovals:   id => api.get(`/bids/${id}/approvals`),
   getHistory:     id => api.get(`/bids/${id}/history`),
   getVendorRank:  id => api.get(`/bids/${id}/vendor-rank`),
-  getInvitations: p => api.get("/bids/invitations", { params: p }),
-  updateInvStatus:(id, d) => api.patch(`/bids/invitations/${id}`, d),
+  getInvitations: bidId => api.get(`/bids/${bidId}/invitations`),
+  updateInvStatus:(bidId, invId, d) => api.patch(`/bids/${bidId}/invitations/${invId}/status`, d),
   calendarEvents: p => api.get("/bids/calendar", { params: p }),
 }
 
@@ -306,12 +306,13 @@ export const locationApi = {
 
 // ── EXCEL IMPORT ──────────────────────────────────────────────────────────────
 export const excelImportApi = {
-  upload:    d => api.post("/excel-import", d),
-  list:      () => api.get("/excel-import"),
-  getErrors: id => api.get(`/excel-import/${id}/errors`),
   history:        () => api.get("/excel-import/history"),
-  analyze:        d => api.post("/excel-import/analyze", d),
-  importCriteria: () => api.get("/excel-import/criteria"),
+  analyze:        file => {
+    const form = new FormData()
+    form.append("file", file)
+    return api.post("/excel-import/analyze", form, { headers: { "Content-Type": "multipart/form-data" } })
+  },
+  importCriteria: d => api.post("/excel-import/import-evaluation-criteria", d),
 }
 
 // ── BONDS ─────────────────────────────────────────────────────────────────────

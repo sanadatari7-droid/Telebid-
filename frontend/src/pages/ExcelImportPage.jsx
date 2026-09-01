@@ -41,13 +41,18 @@ export default function ExcelImportPage() {
   const handleImport = async () => {
     if (!analysis || !templateName) return
     const sheet = analysis.sheets[selectedSheet]
-    // Build rows from sample + tell user it's ready
     setImporting(true)
     try {
+      // `mapping` is keyed by column header (e.g. {"Field Name": "field_name"}) for the
+      // UI's dropdowns, but the backend reads it the other way round — semantic type to
+      // header (row.get(mapping.get("field_name"))) — so invert it here before sending.
+      const invertedMapping = Object.fromEntries(
+        Object.entries(mapping).filter(([, type]) => type !== "ignore").map(([header, type]) => [type, header])
+      )
       const res = await excelImportApi.importCriteria({
         template_name: templateName,
-        column_mapping: mapping,
-        rows: [] // In full implementation, rows come from re-parsing the file
+        column_mapping: invertedMapping,
+        rows: sheet.all_rows || []
       })
       setImportResult(res.data)
       toast.success(`Import complete: ${res.data.imported} criteria imported`)
