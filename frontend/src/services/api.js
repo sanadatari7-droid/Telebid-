@@ -71,7 +71,7 @@ export const bidsApi = {
   uploadDoc:      (id, d) => api.post(`/bids/${id}/documents`, d),
   getApprovals:   id => api.get(`/bids/${id}/approvals`),
   getHistory:     id => api.get(`/bids/${id}/history`),
-  getVendorRank:  id => api.get(`/bids/${id}/vendor-rank`),
+  getVendorRank:  id => api.get(`/bids/${id}/vendor-ranking`),
   getInvitations: bidId => api.get(`/bids/${bidId}/invitations`),
   updateInvStatus:(bidId, invId, d) => api.patch(`/bids/${bidId}/invitations/${invId}/status`, d),
   calendarEvents: p => api.get("/bids/calendar", { params: p }),
@@ -84,7 +84,7 @@ export const oppsApi = {
   create: d => api.post("/opportunities", d),
   update: (id, d) => api.patch(`/opportunities/${id}`, d),
   submit:          id => api.post(`/opportunities/${id}/submit`),
-  managerDecision: (id, d) => api.post(`/opportunities/${id}/decision`, d),
+  managerDecision: (id, d) => api.post(`/opportunities/${id}/manager-decision`, d),
 }
 
 // ── OPPORTUNITIES V2 ──────────────────────────────────────────────────────────
@@ -278,8 +278,8 @@ export const exproApi = {
   getLogs:        p => api.get("/expro/logs", { params: p }),
   getLog:         id => api.get(`/expro/logs/${id}`),
   createLog:      d => api.post("/expro/logs", d),
-  submitLog:      id => api.post(`/expro/logs/${id}/submit`),
-  reviewLog:      (id, d) => api.post(`/expro/logs/${id}/review`, d),
+  submitLog:      id => api.patch(`/expro/logs/${id}/submit`),
+  reviewLog:      (id, d) => api.patch(`/expro/logs/${id}/review`, d),
   getFieldDefs:   () => api.get("/expro/field-definitions"),
   addFieldDef:    d => api.post("/expro/field-definitions", d),
   deleteFieldDef: id => api.delete(`/expro/field-definitions/${id}`),
@@ -290,8 +290,8 @@ export const bidLogsApi = {
   list:   p => api.get("/bid-logs", { params: p }),
   create: d => api.post("/bid-logs", d),
   getBidLogs:     p => api.get("/bid-logs", { params: p }),
-  getEvalLogs:    p => api.get("/bid-logs/evaluations", { params: p }),
-  getUserActivity:p => api.get("/bid-logs/activity", { params: p }),
+  getEvalLogs:    p => api.get("/bid-logs/evaluation-logs", { params: p }),
+  getUserActivity:p => api.get("/bid-logs/user-activity", { params: p }),
 }
 
 // ── SEARCH ────────────────────────────────────────────────────────────────────
