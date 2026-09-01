@@ -13,7 +13,7 @@ api.interceptors.request.use(config => {
 // Auth endpoints intentionally return 401 for bad credentials/OTP — that's a normal,
 // recoverable form error, not a "your session died" event, so the interceptor below
 // must not treat it as one (clearing storage / redirecting mid-login-attempt).
-const AUTH_ENDPOINTS = ["/auth/login", "/auth/verify-otp", "/auth/register", "/auth/refresh"]
+const AUTH_ENDPOINTS = ["/auth/login", "/auth/verify-otp", "/auth/register", "/auth/signup", "/auth/refresh"]
 const isAuthEndpoint = url => AUTH_ENDPOINTS.some(p => url?.includes(p))
 
 api.interceptors.response.use(
@@ -51,6 +51,7 @@ export const authApi = {
   verifyOtp:  d => api.post("/auth/verify-otp", d),
   refreshToken: () => api.post("/auth/refresh"),
   register:   d => api.post("/auth/register", d),
+  signup:     d => api.post("/auth/signup", d),
 }
 
 // ── BIDS ──────────────────────────────────────────────────────────────────────

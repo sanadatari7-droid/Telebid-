@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom"
 import { useAuthStore } from "./store/authStore"
 import AppLayout from "./components/layout/AppLayout"
 import LoginPage from "./pages/LoginPage"
+import SignupPage from "./pages/SignupPage"
 import RegisterPage from "./pages/RegisterPage"
 
 const DashboardPage    = lazy(() => import("./pages/DashboardPage"))
@@ -61,6 +62,11 @@ function Guard({ children }) {
   const { isAuthenticated } = useAuthStore()
   return isAuthenticated ? children : <Navigate to="/login" replace/>
 }
+function AdminGuard({ children }) {
+  const { isAuthenticated, hasRole } = useAuthStore()
+  if (!isAuthenticated) return <Navigate to="/login" replace/>
+  return hasRole("ADMIN") ? children : <Navigate to="/dashboard" replace/>
+}
 function Page({ component: C }) {
   return <ErrorBoundary><C/></ErrorBoundary>
 }
@@ -70,10 +76,11 @@ export default function App() {
     <Suspense fallback={<Loader/>}>
       <Routes>
         <Route path="/login" element={<LoginPage/>}/>
-        <Route path="/register" element={<RegisterPage/>}/>
+        <Route path="/signup" element={<SignupPage/>}/>
         <Route path="/" element={<Guard><AppLayout/></Guard>}>
           <Route index element={<Navigate to="/dashboard" replace/>}/>
           <Route path="dashboard"     element={<Page component={DashboardPage}/>}/>
+          <Route path="register" element={<AdminGuard><Page component={RegisterPage}/></AdminGuard>}/>
           <Route path="bids"          element={<Page component={BidsPage}/>}/>
           <Route path="bids/:id"      element={<Page component={BidDetailPage}/>}/>
           <Route path="opportunities" element={<Page component={OpportunitiesPage}/>}/>

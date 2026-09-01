@@ -223,10 +223,10 @@ export default function LoginPage() {
               </div>
 
               <p className="text-center text-xs text-gray-400 mt-5">
-                Don't have an account?{" "}
-                <button onClick={() => navigate("/register")}
+                Don't have a company workspace yet?{" "}
+                <button onClick={() => navigate("/signup")}
                   className="text-blue-600 font-medium hover:underline">
-                  Register
+                  Create one
                 </button>
               </p>
             </div>
