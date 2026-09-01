@@ -131,7 +131,7 @@ export const vendorsApi = {
   invite:  (id,d) => api.post(`/vendors/${id}/invite`, d),
   evalApi: { list: p => api.get("/evaluations", {params:p}), create: d => api.post("/evaluations",d) },
   bulkImport:   d => api.post("/vendors/bulk-import", d),
-  unblacklist:  id => api.post(`/vendors/${id}/unblacklist`),
+  unblacklist:  id => api.delete(`/vendors/${id}/blacklist`),
 }
 
 // ── EVALUATIONS ───────────────────────────────────────────────────────────────
