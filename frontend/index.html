@@ -14,6 +14,16 @@
   <noscript>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   </noscript>
+  <script>
+    // Applies the saved theme before React mounts, so a fresh load or hard
+    // refresh doesn't flash light mode then snap to dark once SettingsPage
+    // (the only place that used to toggle this) runs its effect.
+    try {
+      if (localStorage.getItem('darkMode') === 'true') {
+        document.documentElement.classList.add('dark');
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <div id="root"></div>

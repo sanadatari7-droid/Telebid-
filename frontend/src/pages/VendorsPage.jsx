@@ -137,7 +137,7 @@ export default function VendorsPage() {
               {v.is_blacklisted && <span className="badge-red flex-shrink-0"><AlertTriangle size={10}/> Blacklisted</span>}
             </div>
             <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
-              {v.email && <span className="flex items-center gap-1 truncate"><Mail size={10}/>{v.email}</span>}
+              {v.email && <span className="flex items-center gap-1 min-w-0"><Mail size={10} className="flex-shrink-0"/><span className="truncate">{v.email}</span></span>}
               {v.phone && <span className="flex items-center gap-1"><Phone size={10}/>{v.phone}</span>}
               <span>Contracts: <strong className="text-gray-700">{v.total_contracts || 0}</strong></span>
               <span>Score: <strong className="text-gray-700">{v.avg_score ? `${v.avg_score}/100` : "—"}</strong></span>
