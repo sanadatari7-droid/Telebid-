@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.db.postgres import get_db, execute, fetch_one
+from app.db.postgres import get_db, execute, fetch_one, fetch_val, require_company
 from app.middleware.auth import get_current_user
 from pydantic import BaseModel
 from typing import Optional
@@ -28,8 +28,9 @@ async def geocode(body: LocationSearch, conn=Depends(get_db),
     """Use Google Maps Geocoding API to get coordinates for a location query."""
     # Get API key from settings if not provided
     if not body.api_key:
+        company_id = require_company(current_user)
         setting = await fetch_one(conn,
-            "SELECT setting_value FROM system_settings WHERE setting_key='google_maps_key' AND company_id=1")
+            "SELECT setting_value FROM system_settings WHERE setting_key='google_maps_key' AND company_id=$1", company_id)
         api_key = setting["setting_value"] if setting else ""
     else:
         api_key = body.api_key
@@ -81,13 +82,15 @@ async def geocode(body: LocationSearch, conn=Depends(get_db),
 async def save_location(body: LocationUpdate, conn=Depends(get_db),
     current_user=Depends(get_current_user)):
     """Save location info to a bid."""
-    await execute(conn,
+    company_id = require_company(current_user)
+    result = await execute(conn,
         """UPDATE bids SET
                location_name=$1, location_address=$2, location_city=$3,
                location_country=$4, location_lat=$5, location_lng=$6,
                location_source=$7, location_confidence=$8, updated_at=NOW()
-           WHERE bid_id=$9""",
+           WHERE bid_id=$9 AND company_id=$10""",
         body.location_name, body.location_address, body.location_city,
         body.location_country, body.location_lat, body.location_lng,
-        body.location_source, body.location_confidence, body.bid_id)
+        body.location_source, body.location_confidence, body.bid_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bid not found")
     return {"message": "Location saved"}

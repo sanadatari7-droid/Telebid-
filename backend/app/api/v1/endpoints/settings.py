@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List
-from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 from pydantic import BaseModel
 
@@ -20,8 +20,9 @@ class DropdownOption(BaseModel):
 @router.get("")
 async def get_settings(category: Optional[str] = None, conn=Depends(get_db),
     current_user=Depends(get_current_user)):
-    sql = "SELECT * FROM system_settings WHERE company_id=1"
-    args = []
+    company_id = require_company(current_user)
+    sql = "SELECT * FROM system_settings WHERE company_id=$1"
+    args = [company_id]
     if category:
         args.append(category)
         sql += f" AND category=${len(args)}"
@@ -36,50 +37,57 @@ async def get_settings(category: Optional[str] = None, conn=Depends(get_db),
 @router.patch("/{setting_key}")
 async def update_setting(setting_key: str, body: SettingUpdate, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     exists = await fetch_one(conn,
-        "SELECT setting_id FROM system_settings WHERE setting_key=$1 AND company_id=1", setting_key)
+        "SELECT setting_id FROM system_settings WHERE setting_key=$1 AND company_id=$2", setting_key, company_id)
     if not exists:
         raise HTTPException(status_code=404, detail="Setting not found")
     await execute(conn,
-        "UPDATE system_settings SET setting_value=$1, updated_by=$2, updated_at=NOW() WHERE setting_key=$3 AND company_id=1",
-        body.setting_value, current_user.user_id, setting_key)
+        "UPDATE system_settings SET setting_value=$1, updated_by=$2, updated_at=NOW() WHERE setting_key=$3 AND company_id=$4",
+        body.setting_value, current_user.user_id, setting_key, company_id)
     return {"message": "Setting updated"}
 
 @router.get("/dropdowns/{dropdown_key}")
 async def get_dropdown(dropdown_key: str, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_all(conn,
-        "SELECT * FROM dropdown_configs WHERE dropdown_key=$1 AND company_id=1 AND is_active=TRUE ORDER BY sort_order",
-        dropdown_key)
+        "SELECT * FROM dropdown_configs WHERE dropdown_key=$1 AND company_id=$2 AND is_active=TRUE ORDER BY sort_order",
+        dropdown_key, company_id)
 
 @router.get("/dropdowns")
 async def list_dropdowns(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_all(conn,
-        "SELECT DISTINCT dropdown_key, dropdown_label FROM dropdown_configs WHERE company_id=1 ORDER BY dropdown_key")
+        "SELECT DISTINCT dropdown_key, dropdown_label FROM dropdown_configs WHERE company_id=$1 ORDER BY dropdown_key", company_id)
 
 @router.post("/dropdowns")
 async def add_dropdown_option(body: DropdownOption, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     await execute(conn,
-        "INSERT INTO dropdown_configs (company_id, dropdown_key, dropdown_label, option_value, option_label, option_label_ar, sort_order) VALUES (1,$1,$2,$3,$4,$5,$6)",
-        body.dropdown_key, body.dropdown_label, body.option_value, body.option_label,
+        "INSERT INTO dropdown_configs (company_id, dropdown_key, dropdown_label, option_value, option_label, option_label_ar, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        company_id, body.dropdown_key, body.dropdown_label, body.option_value, body.option_label,
         body.option_label_ar, body.sort_order)
     return {"message": "Option added"}
 
 @router.delete("/dropdowns/{dropdown_key}/{option_value}")
 async def delete_dropdown_option(dropdown_key: str, option_value: str, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     await execute(conn,
-        "UPDATE dropdown_configs SET is_active=FALSE WHERE dropdown_key=$1 AND option_value=$2 AND company_id=1",
-        dropdown_key, option_value)
+        "UPDATE dropdown_configs SET is_active=FALSE WHERE dropdown_key=$1 AND option_value=$2 AND company_id=$3",
+        dropdown_key, option_value, company_id)
     return {"message": "Option removed"}
 
 @router.get("/company")
 async def get_company(conn=Depends(get_db), current_user=Depends(get_current_user)):
-    return await fetch_one(conn, "SELECT * FROM companies WHERE company_id=1")
+    company_id = require_company(current_user)
+    return await fetch_one(conn, "SELECT * FROM companies WHERE company_id=$1", company_id)
 
 @router.patch("/company")
 async def update_company(body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     allowed = ["company_name","company_name_ar","address","city","country","phone","email","website","industry"]
     updates = ["updated_at=NOW()"]
     args = []
@@ -89,7 +97,7 @@ async def update_company(body: dict, conn=Depends(get_db),
             updates.append(f"{k}=${len(args)}")
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update")
-    args.append(1)
+    args.append(company_id)
     await execute(conn, f"UPDATE companies SET {','.join(updates)} WHERE company_id=${len(args)}", *args)
     return {"message": "Company updated"}
 
@@ -99,14 +107,16 @@ async def get_modules(conn=Depends(get_db), current_user=Depends(get_current_use
 
 @router.get("/ict-categories")
 async def get_ict_categories(conn=Depends(get_db), current_user=Depends(get_current_user)):
-    return await fetch_all(conn, "SELECT * FROM ict_categories WHERE is_active=TRUE ORDER BY sort_order")
+    company_id = require_company(current_user)
+    return await fetch_all(conn, "SELECT * FROM ict_categories WHERE is_active=TRUE AND company_id=$1 ORDER BY sort_order", company_id)
 
 @router.post("/ict-categories")
 async def add_ict_category(body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     await execute(conn,
-        "INSERT INTO ict_categories (company_id, cat_code, cat_name, cat_name_ar, description, has_construction) VALUES (1,$1,$2,$3,$4,$5)",
-        body["cat_code"], body["cat_name"], body.get("cat_name_ar"), body.get("description"), body.get("has_construction", False))
+        "INSERT INTO ict_categories (company_id, cat_code, cat_name, cat_name_ar, description, has_construction) VALUES ($1,$2,$3,$4,$5,$6)",
+        company_id, body["cat_code"], body["cat_name"], body.get("cat_name_ar"), body.get("description"), body.get("has_construction", False))
     return {"message": "ICT category added"}
 
 @router.post("/test-email")

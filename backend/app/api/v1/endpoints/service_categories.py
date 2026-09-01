@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from pydantic import BaseModel
-from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 
 router = APIRouter(prefix="/service-categories", tags=["Service Categories"])
@@ -18,8 +18,9 @@ async def list_categories(
     service_type: Optional[str]=None,
     parent_id: Optional[int]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
-    conds = ["is_active=TRUE"]
-    args = []
+    company_id = require_company(current_user)
+    conds = ["is_active=TRUE", "company_id=$1"]
+    args = [company_id]
     if service_type:
         args.append(service_type); conds.append(f"service_type=${len(args)}")
     if parent_id is not None:
@@ -28,18 +29,19 @@ async def list_categories(
         else:
             args.append(parent_id); conds.append(f"parent_id=${len(args)}")
     where = " AND ".join(conds)
-    return await fetch_all(conn, f"SELECT * FROM service_categories WHERE {where} ORDER BY sort_order, cat_name")
+    return await fetch_all(conn, f"SELECT * FROM service_categories WHERE {where} ORDER BY sort_order, cat_name", *args)
 
 @router.get("/tree")
 async def get_tree(service_type: str, conn=Depends(get_db), current_user=Depends(get_current_user)):
     """Return full hierarchy tree for a service type."""
+    company_id = require_company(current_user)
     roots = await fetch_all(conn,
-        "SELECT * FROM service_categories WHERE service_type=$1 AND parent_id IS NULL AND is_active=TRUE ORDER BY sort_order",
-        service_type)
+        "SELECT * FROM service_categories WHERE service_type=$1 AND parent_id IS NULL AND is_active=TRUE AND company_id=$2 ORDER BY sort_order",
+        service_type, company_id)
     async def get_children(parent_id):
         children = await fetch_all(conn,
-            "SELECT * FROM service_categories WHERE parent_id=$1 AND is_active=TRUE ORDER BY sort_order",
-            parent_id)
+            "SELECT * FROM service_categories WHERE parent_id=$1 AND is_active=TRUE AND company_id=$2 ORDER BY sort_order",
+            parent_id, company_id)
         result = []
         for c in children:
             c = dict(c)
@@ -55,16 +57,20 @@ async def get_tree(service_type: str, conn=Depends(get_db), current_user=Depends
 
 @router.post("", status_code=201)
 async def create_category(body: CategoryCreate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     parent_level = 0
     if body.parent_id:
-        parent = await fetch_one(conn, "SELECT level FROM service_categories WHERE cat_id=$1", body.parent_id)
-        if parent: parent_level = parent["level"]
+        parent = await fetch_one(conn, "SELECT level FROM service_categories WHERE cat_id=$1 AND company_id=$2", body.parent_id, company_id)
+        if not parent: raise HTTPException(status_code=404, detail="Parent category not found")
+        parent_level = parent["level"]
     await execute(conn,
-        "INSERT INTO service_categories (service_type, parent_id, cat_name, cat_name_ar, level, sort_order) VALUES ($1,$2,$3,$4,$5,$6)",
-        body.service_type, body.parent_id, body.cat_name, body.cat_name_ar, parent_level+1, body.sort_order)
+        "INSERT INTO service_categories (service_type, parent_id, cat_name, cat_name_ar, level, sort_order, company_id) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        body.service_type, body.parent_id, body.cat_name, body.cat_name_ar, parent_level+1, body.sort_order, company_id)
     return {"message": "Category created"}
 
 @router.delete("/{cat_id}")
 async def delete_category(cat_id: int, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
-    await execute(conn, "UPDATE service_categories SET is_active=FALSE WHERE cat_id=$1 OR parent_id=$1", cat_id)
+    company_id = require_company(current_user)
+    result = await execute(conn, "UPDATE service_categories SET is_active=FALSE WHERE (cat_id=$1 OR parent_id=$1) AND company_id=$2", cat_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Category not found")
     return {"message": "Deactivated"}

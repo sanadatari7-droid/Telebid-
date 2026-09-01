@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from app.db.postgres import get_db, fetch_all, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, execute, fetch_val, require_company
 from app.middleware.auth import require_roles, get_current_user
 import io, json
 
@@ -81,6 +81,7 @@ def _suggest_mapping(headers: list) -> dict:
 async def import_eval_criteria(body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
     """Import evaluation criteria from pre-analyzed Excel data (after user confirmation)."""
+    company_id = require_company(current_user)
     rows = body.get("rows", [])
     mapping = body.get("column_mapping", {})
     template_name = body.get("template_name", "Imported Template")
@@ -91,15 +92,15 @@ async def import_eval_criteria(body: dict, conn=Depends(get_db),
     # Create import log
     import_id = await fetch_val(conn,
         """INSERT INTO excel_imports (company_id, file_name, import_type, total_rows, imported_by)
-           VALUES (1,$1,'EVALUATION_CRITERIA',$2,$3) RETURNING import_id""",
-        template_name, len(rows), current_user.user_id)
+           VALUES ($1,$2,'EVALUATION_CRITERIA',$3,$4) RETURNING import_id""",
+        company_id, template_name, len(rows), current_user.user_id)
 
     # Create evaluation template
     await execute(conn,
-        "INSERT INTO evaluation_templates (tmpl_name, description, created_by) VALUES ($1,$2,$3)",
-        template_name, f"Imported from Excel on {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}", current_user.user_id)
+        "INSERT INTO evaluation_templates (tmpl_name, description, created_by, company_id) VALUES ($1,$2,$3,$4)",
+        template_name, f"Imported from Excel on {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}", current_user.user_id, company_id)
     tmpl_id = await fetch_val(conn,
-        "SELECT tmpl_id FROM evaluation_templates ORDER BY tmpl_id DESC LIMIT 1")
+        "SELECT tmpl_id FROM evaluation_templates WHERE company_id=$1 ORDER BY tmpl_id DESC LIMIT 1", company_id)
 
     imported = skipped = errors = 0
     error_details = []
@@ -146,8 +147,8 @@ async def import_eval_criteria(body: dict, conn=Depends(get_db),
                 for opt in options:
                     await execute(conn,
                         """INSERT INTO dropdown_configs (company_id, dropdown_key, dropdown_label, option_value, option_label, sort_order)
-                           VALUES (1,$1,$2,$3,$4,$5) ON CONFLICT DO NOTHING""",
-                        f"eval_{tmpl_id}_{i}", field_name, opt.upper().replace(' ','_'), opt, options.index(opt))
+                           VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING""",
+                        company_id, f"eval_{tmpl_id}_{i}", field_name, opt.upper().replace(' ','_'), opt, options.index(opt))
             imported += 1
         except Exception as e:
             errors += 1
@@ -171,7 +172,9 @@ async def import_eval_criteria(body: dict, conn=Depends(get_db),
 
 @router.get("/history")
 async def import_history(conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
     return await fetch_all(conn, """
         SELECT ei.*, u.full_name AS imported_by_name
         FROM excel_imports ei LEFT JOIN users u ON ei.imported_by=u.user_id
-        ORDER BY ei.imported_at DESC LIMIT 50""")
+        WHERE ei.company_id=$1
+        ORDER BY ei.imported_at DESC LIMIT 50""", company_id)
