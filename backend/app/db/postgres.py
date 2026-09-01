@@ -65,6 +65,18 @@ async def fetch_page(conn, sql: str, args: list, page: int, page_size: int) -> D
         "total_pages": max(1, (total + page_size - 1) // page_size)
     }
 
+def require_company(current_user) -> int:
+    """Returns current_user.company_id, or fails closed (403) if unset.
+
+    Called at the top of every tenant-scoped endpoint handler; the returned
+    value is the ONLY source of truth for which company's rows a query may
+    touch — never accept company_id from client input (body/query params).
+    """
+    from fastapi import HTTPException
+    if not getattr(current_user, "company_id", None):
+        raise HTTPException(status_code=403, detail="Account is not associated with a company")
+    return current_user.company_id
+
 async def get_raw_connection():
     import asyncpg
     from app.core.config import settings

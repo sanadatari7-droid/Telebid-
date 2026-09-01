@@ -5,6 +5,7 @@ from app.core.security import (
     generate_otp_secret, generate_totp, decode_token, hash_password
 )
 from app.core.config import settings
+from app.middleware.auth import require_roles, CurrentUser
 from pydantic import BaseModel
 from typing import Optional
 import secrets, re
@@ -30,13 +31,22 @@ class RegisterRequest(BaseModel):
     job_title: str = ""
 
 
+class TenantSignupRequest(BaseModel):
+    company_name: str
+    company_code: str
+    admin_username: str
+    admin_email: str
+    admin_password: str
+    admin_full_name: str
+
+
 # ── Login ─────────────────────────────────────────────────────────────────────
 
 @router.post("/login")
 async def login(body: LoginRequest, conn=Depends(get_db)):
     user = await fetch_one(conn, """
         SELECT user_id, username, email, full_name, password_hash,
-               is_active, is_locked, failed_attempts, otp_secret, otp_enabled
+               is_active, is_locked, failed_attempts, otp_secret, otp_enabled, company_id
         FROM users WHERE username=$1 OR email=$1""", body.username)
 
     if not user:
@@ -139,7 +149,11 @@ async def verify_otp(body: OTPVerify, conn=Depends(get_db)):
 async def _issue_tokens(conn, user: dict) -> dict:
     uid = user["user_id"]
 
-    access_token  = create_access_token({"sub": str(uid), "username": user["username"]})
+    # company_id in the JWT is convenience/debugging metadata only — every
+    # request re-derives it fresh from the users table (see get_current_user),
+    # so a stale claim in an already-issued token can't grant access after a
+    # user is moved between companies.
+    access_token  = create_access_token({"sub": str(uid), "username": user["username"], "company_id": user.get("company_id")})
     refresh_token = create_refresh_token({"sub": str(uid)})
 
     await execute(conn, "UPDATE users SET last_login=NOW() WHERE user_id=$1", uid)
@@ -155,6 +169,10 @@ async def _issue_tokens(conn, user: dict) -> dict:
         SELECT d.dept_name FROM departments d
         JOIN users u ON d.dept_id = u.dept_id
         WHERE u.user_id = $1""", uid)
+
+    company = await fetch_one(conn,
+        "SELECT c.company_id, c.company_name FROM companies c JOIN users u ON c.company_id=u.company_id WHERE u.user_id=$1",
+        uid)
 
     try:
         await execute(conn, """
@@ -177,6 +195,8 @@ async def _issue_tokens(conn, user: dict) -> dict:
             "job_title": user.get("job_title"),
             "dept_name": dept["dept_name"] if dept else None,
             "roles":     roles,
+            "company_id":   company["company_id"] if company else None,
+            "company_name": company["company_name"] if company else None,
         }
     }
 
@@ -202,16 +222,66 @@ async def logout():
     return {"message": "Logged out successfully"}
 
 
-# ── Register ──────────────────────────────────────────────────────────────────
+def _validate_password(password: str):
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not re.search(r"[0-9]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+
+
+# ── Tenant Signup (public — creates a NEW company) ─────────────────────────────
+
+@router.post("/signup", status_code=201)
+async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
+    """Creates a brand new company (tenant) plus its first user, who is
+    unconditionally that company's ADMIN. This is the only public,
+    unauthenticated way to create a company — it replaces the old
+    /auth/register, which let anyone join the single existing company and
+    made the first user in the WHOLE SYSTEM an admin (meaningless once more
+    than one tenant exists). Existing companies invite teammates via the
+    authenticated POST /auth/register below instead."""
+    _validate_password(body.admin_password)
+
+    existing_company = await fetch_val(conn, "SELECT company_id FROM companies WHERE company_code=$1", body.company_code)
+    if existing_company:
+        raise HTTPException(status_code=409, detail="Company code already in use")
+    existing_user = await fetch_one(conn,
+        "SELECT user_id FROM users WHERE username=$1 OR email=$2", body.admin_username, body.admin_email)
+    if existing_user:
+        raise HTTPException(status_code=409, detail="Username or email already exists")
+
+    pw_hash = hash_password(body.admin_password)
+    async with conn.transaction():
+        company_id = await fetch_val(conn,
+            "INSERT INTO companies (company_code, company_name, is_active) VALUES ($1,$2,TRUE) RETURNING company_id",
+            body.company_code, body.company_name)
+        uid = await fetch_val(conn, """
+            INSERT INTO users (username, email, password_hash, full_name, is_active, otp_enabled, company_id)
+            VALUES ($1,$2,$3,$4,TRUE,FALSE,$5) RETURNING user_id""",
+            body.admin_username, body.admin_email, pw_hash, body.admin_full_name, company_id)
+        role_id = await fetch_val(conn, "SELECT role_id FROM roles WHERE role_code='ADMIN'")
+        if role_id:
+            await execute(conn, "INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2)", uid, role_id)
+
+    try:
+        await execute(conn,
+            "INSERT INTO audit_logs (user_id, username, action, module, company_id) VALUES ($1,$2,'COMPANY_SIGNUP','AUTH',$3)",
+            uid, body.admin_username, company_id)
+    except Exception:
+        pass
+
+    user = await fetch_one(conn, "SELECT * FROM users WHERE user_id=$1", uid)
+    return await _issue_tokens(conn, user)
+
+
+# ── Register (authenticated — invites a teammate into YOUR company) ───────────
 
 @router.post("/register", status_code=201)
-async def register(body: RegisterRequest, conn=Depends(get_db)):
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    if not re.search(r"[A-Z]", body.password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
-    if not re.search(r"[0-9]", body.password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+async def register(body: RegisterRequest, conn=Depends(get_db),
+                    current_user: CurrentUser = Depends(require_roles("ADMIN"))):
+    _validate_password(body.password)
 
     existing = await fetch_one(conn,
         "SELECT user_id FROM users WHERE username=$1 OR email=$2",
@@ -221,14 +291,14 @@ async def register(body: RegisterRequest, conn=Depends(get_db)):
 
     pw_hash = hash_password(body.password)
     await execute(conn, """
-        INSERT INTO users (username, email, password_hash, full_name, job_title, is_active, otp_enabled)
-        VALUES ($1, $2, $3, $4, $5, TRUE, FALSE)""",
-        body.username, body.email, pw_hash, body.full_name, body.job_title)
+        INSERT INTO users (username, email, password_hash, full_name, job_title, is_active, otp_enabled, company_id)
+        VALUES ($1, $2, $3, $4, $5, TRUE, FALSE, $6)""",
+        body.username, body.email, pw_hash, body.full_name, body.job_title, current_user.company_id)
 
     uid = await fetch_val(conn, "SELECT user_id FROM users WHERE username=$1", body.username)
-    total = await fetch_val(conn, "SELECT COUNT(*) FROM users")
-    role_code = "ADMIN" if total == 1 else "PROCUREMENT"
-    role_id = await fetch_val(conn, "SELECT role_id FROM roles WHERE role_code=$1", role_code)
+    # New teammates always land as PROCUREMENT — an admin promotes them
+    # explicitly afterwards via User Management, never automatically.
+    role_id = await fetch_val(conn, "SELECT role_id FROM roles WHERE role_code='PROCUREMENT'")
     if role_id:
         await execute(conn,
             "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -236,13 +306,13 @@ async def register(body: RegisterRequest, conn=Depends(get_db)):
 
     try:
         await execute(conn,
-            "INSERT INTO audit_logs (user_id, username, action, module) VALUES ($1,$2,'REGISTER','AUTH')",
-            uid, body.username)
+            "INSERT INTO audit_logs (user_id, username, action, module, company_id) VALUES ($1,$2,'REGISTER','AUTH',$3)",
+            uid, body.username, current_user.company_id)
     except Exception:
         pass
 
     return {
-        "message": "Account created. You can now log in.",
+        "message": "Account created.",
         "username": body.username,
-        "role": role_code,
+        "role": "PROCUREMENT",
     }

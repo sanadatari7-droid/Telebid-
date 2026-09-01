@@ -1471,3 +1471,86 @@ CREATE TABLE IF NOT EXISTS opp_ai_insights (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_opp_ai_insights_opp ON opp_ai_insights(opp_id, created_at DESC);
+
+-- ============================================================
+-- MULTI-TENANCY CONVERSION
+-- Every company that signs up gets its own row in `companies` and every
+-- user/record belongs to exactly one. Before this, `company_id=1` was the
+-- only company that ever existed and almost nothing filtered by it, so any
+-- second tenant's data would have been visible to everyone. This migration
+-- is additive and non-destructive: every existing row is backfilled to
+-- company_id=1 (the original seeded "TeleBid Enterprise" tenant) before
+-- NOT NULL is enforced, so nothing here can lose data.
+-- ============================================================
+
+-- users: the core identity/tenant link. Also add is_platform_admin now
+-- (unused, no UI yet) so a future cross-tenant support view doesn't require
+-- re-touching every endpoint that gets converted below.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN DEFAULT FALSE;
+UPDATE users SET company_id = 1 WHERE company_id IS NULL;
+ALTER TABLE users ALTER COLUMN company_id SET NOT NULL;
+
+-- Tables with no company_id column at all today.
+ALTER TABLE vendors             ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE opportunities       ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE evaluation_templates ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE evaluation_criteria ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE bid_evaluations     ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE evaluation_scores   ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE contracts           ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE opportunity_bonds   ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE invitations         ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE documents           ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE notifications       ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE audit_logs          ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE employees           ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE company_references  ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE purchase_requests   ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE approvals           ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE comments            ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+ALTER TABLE vendor_performance  ADD COLUMN IF NOT EXISTS company_id INT REFERENCES companies(company_id);
+
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'vendors','opportunities','evaluation_templates','evaluation_criteria',
+    'bid_evaluations','evaluation_scores','contracts','opportunity_bonds',
+    'invitations','documents','notifications','audit_logs','employees',
+    'company_references','purchase_requests','approvals','comments',
+    'vendor_performance',
+    -- Tables that already had a company_id column but were never backfilled
+    -- or enforced NOT NULL: bids (added via ALTER earlier in this file),
+    -- and everything below.
+    'bids','ict_categories','ict_projects','expro_field_definitions',
+    'expro_logs','bid_logs','excel_imports','search_index',
+    'solution_families','solution_types','opportunities_v2',
+    'customer_ref_config','service_categories','company_account_managers',
+    'company_bid_managers','won_records','lost_records','dropdown_configs',
+    'system_settings'
+  ]
+  LOOP
+    EXECUTE format('UPDATE %I SET company_id = 1 WHERE company_id IS NULL', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN company_id SET NOT NULL', t);
+    -- Transitional DEFAULT 1: every endpoint's INSERTs are being converted to
+    -- set company_id explicitly from the authenticated user (see the endpoint
+    -- conversion work tracked separately), but until that's complete for a
+    -- given file, this default keeps existing INSERTs from breaking instead
+    -- of silently defaulting new rows to the wrong tenant forever. Safe to
+    -- drop once every INSERT across the codebase sets it explicitly.
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN company_id SET DEFAULT 1', t);
+  END LOOP;
+END $$;
+ALTER TABLE users ALTER COLUMN company_id SET DEFAULT 1;
+
+-- Indexes for the tables hit by hot list/dashboard endpoints.
+CREATE INDEX IF NOT EXISTS idx_users_company_id ON users(company_id);
+CREATE INDEX IF NOT EXISTS idx_bids_company_id ON bids(company_id);
+CREATE INDEX IF NOT EXISTS idx_vendors_company_id ON vendors(company_id);
+CREATE INDEX IF NOT EXISTS idx_opportunities_company_id ON opportunities(company_id);
+CREATE INDEX IF NOT EXISTS idx_opportunities_v2_company_id ON opportunities_v2(company_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_company_id ON contracts(company_id);
+CREATE INDEX IF NOT EXISTS idx_employees_company_id ON employees(company_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_company_id ON notifications(company_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_company_id ON audit_logs(company_id);

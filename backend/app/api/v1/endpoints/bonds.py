@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import date
 from pydantic import BaseModel
-from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val
+from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, CurrentUser
 
 router = APIRouter(prefix="/bonds", tags=["Bonds"])
@@ -35,8 +35,9 @@ async def list_bonds(
     bond_type: Optional[str] = None,
     status: Optional[str] = None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
-    conds = ["1=1"]
-    args = []
+    company_id = require_company(current_user)
+    conds = ["b.company_id=$1"]
+    args = [company_id]
     if opp_id:
         args.append(opp_id); conds.append(f"b.opp_id=${len(args)}")
     if bond_type:
@@ -57,23 +58,28 @@ async def list_bonds(
 
 @router.post("", status_code=201)
 async def create_bond(body: BondCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    opp_ok = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", body.opp_id, company_id)
+    if not opp_ok: raise HTTPException(status_code=404, detail="Opportunity not found")
     await execute(conn, """
         INSERT INTO opportunity_bonds (opp_id, bond_type, bond_number, bond_amount, currency_id,
-            issue_date, expiry_date, issuer_bank, beneficiary, notes, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+            issue_date, expiry_date, issuer_bank, beneficiary, notes, created_by, company_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
         body.opp_id, body.bond_type, body.bond_number, body.bond_amount, body.currency_id,
         body.issue_date, body.expiry_date, body.issuer_bank, body.beneficiary,
-        body.notes, current_user.user_id)
+        body.notes, current_user.user_id, company_id)
     return {"message": "Bond created"}
 
 @router.get("/{bond_id}")
 async def get_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    bond = await fetch_one(conn, "SELECT * FROM opportunity_bonds WHERE bond_id=$1", bond_id)
+    company_id = require_company(current_user)
+    bond = await fetch_one(conn, "SELECT * FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
     if not bond: raise HTTPException(status_code=404, detail="Bond not found")
     return bond
 
 @router.patch("/{bond_id}")
 async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     allowed = ["bond_number","bond_amount","issue_date","expiry_date","issuer_bank","beneficiary","status","notes"]
     updates = ["updated_at=NOW()"]
     args = []
@@ -81,23 +87,29 @@ async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), curr
         if k in allowed:
             args.append(v); updates.append(f"{k}=${len(args)}")
     if not args: raise HTTPException(status_code=400, detail="Nothing to update")
-    args.append(bond_id)
-    await execute(conn, f"UPDATE opportunity_bonds SET {','.join(updates)} WHERE bond_id=${len(args)}", *args)
+    args.append(bond_id); args.append(company_id)
+    result = await execute(conn, f"UPDATE opportunity_bonds SET {','.join(updates)} WHERE bond_id=${len(args)-1} AND company_id=${len(args)}", *args)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
     return {"message": "Updated"}
 
 @router.post("/{bond_id}/approve")
 async def approve_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    await execute(conn, "UPDATE opportunity_bonds SET approved_by=$1, approved_at=NOW(), status='ISSUED' WHERE bond_id=$2",
-        current_user.user_id, bond_id)
+    company_id = require_company(current_user)
+    result = await execute(conn, "UPDATE opportunity_bonds SET approved_by=$1, approved_at=NOW(), status='ISSUED' WHERE bond_id=$2 AND company_id=$3",
+        current_user.user_id, bond_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
     return {"message": "Bond approved and issued"}
 
 @router.delete("/{bond_id}")
 async def delete_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    await execute(conn, "DELETE FROM opportunity_bonds WHERE bond_id=$1", bond_id)
+    company_id = require_company(current_user)
+    result = await execute(conn, "DELETE FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
+    if result == "DELETE 0": raise HTTPException(status_code=404, detail="Bond not found")
     return {"message": "Deleted"}
 
 @router.get("/stats/summary")
 async def bond_stats(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
     return await fetch_one(conn, """
         SELECT
             COUNT(*) AS total,
@@ -107,4 +119,4 @@ async def bond_stats(conn=Depends(get_db), current_user=Depends(get_current_user
             COUNT(CASE WHEN status='PENDING' THEN 1 END) AS pending,
             COUNT(CASE WHEN status='ISSUED' THEN 1 END) AS issued,
             COUNT(CASE WHEN expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE+7 THEN 1 END) AS expiring_soon
-        FROM opportunity_bonds""")
+        FROM opportunity_bonds WHERE company_id=$1""", company_id)
