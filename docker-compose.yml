@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: telebid-postgres
+    environment:
+      POSTGRES_DB: telebid
+      POSTGRES_USER: telebid
+      POSTGRES_PASSWORD: telebid123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telebid -d telebid"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - telebid-net
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: telebid-api
+    environment:
+      DATABASE_URL: postgresql://telebid:telebid123@postgres:5432/telebid
+      JWT_SECRET_KEY: telebid-super-secret-key-change-in-production-2026!!
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      MAX_FAILED_LOGINS: "5"
+      BCRYPT_ROUNDS: "12"
+      FRONTEND_URL: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - upload_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - telebid-net
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: telebid-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - telebid-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  upload_data:
+
+networks:
+  telebid-net:
+    driver: bridge
