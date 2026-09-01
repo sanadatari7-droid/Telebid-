@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
-from app.db.postgres import get_db, fetch_all
+from app.db.postgres import get_db, fetch_all, require_company
 from app.middleware.auth import get_current_user
 
 router = APIRouter(prefix="/search", tags=["Global Search"])
@@ -9,6 +9,7 @@ router = APIRouter(prefix="/search", tags=["Global Search"])
 async def global_search(q: str = Query(..., min_length=2), conn=Depends(get_db),
     current_user=Depends(get_current_user)):
     """Search across bids, vendors, references, contracts, opportunities."""
+    company_id = require_company(current_user)
     term = f"%{q}%"
     results = []
 
@@ -18,30 +19,30 @@ async def global_search(q: str = Query(..., min_length=2), conn=Depends(get_db),
                bs.status_name AS status, 'bid' AS entity_type,
                b.customer_name, b.created_at
         FROM bids b JOIN bid_statuses bs ON b.status_id=bs.status_id
-        WHERE b.is_deleted=FALSE AND (
-            b.bid_title ILIKE $1 OR b.bid_number ILIKE $1 OR
-            b.customer_name ILIKE $1 OR b.organization ILIKE $1 OR
-            b.description ILIKE $1
-        ) LIMIT 5""", term)
+        WHERE b.is_deleted=FALSE AND b.company_id=$1 AND (
+            b.bid_title ILIKE $2 OR b.bid_number ILIKE $2 OR
+            b.customer_name ILIKE $2 OR b.organization ILIKE $2 OR
+            b.description ILIKE $2
+        ) LIMIT 5""", company_id, term)
     results.extend([{**r, "url": f"/bids/{r['id']}", "subtitle": f"{r['bid_number']} · {r.get('customer_name','')}"} for r in bids])
 
     # Search vendors
     vendors = await fetch_all(conn, """
         SELECT v.vendor_id AS id, v.company_name AS title, 'vendor' AS entity_type,
                v.business_category AS status, v.email, v.created_at
-        FROM vendors v WHERE v.is_deleted=FALSE AND (
-            v.company_name ILIKE $1 OR v.email ILIKE $1 OR
-            v.contact_person ILIKE $1 OR v.registration_no ILIKE $1
-        ) LIMIT 5""", term)
+        FROM vendors v WHERE v.is_deleted=FALSE AND v.company_id=$1 AND (
+            v.company_name ILIKE $2 OR v.email ILIKE $2 OR
+            v.contact_person ILIKE $2 OR v.registration_no ILIKE $2
+        ) LIMIT 5""", company_id, term)
     results.extend([{**r, "url": f"/vendors", "subtitle": r.get("status","") or "Vendor"} for r in vendors])
 
     # Search opportunities
     opps = await fetch_all(conn, """
         SELECT o.opp_id AS id, o.opp_number AS bid_number, o.title AS title,
                o.status, 'opportunity' AS entity_type, o.customer_name, o.created_at
-        FROM opportunities o WHERE o.is_deleted=FALSE AND (
-            o.title ILIKE $1 OR o.opp_number ILIKE $1 OR o.customer_name ILIKE $1
-        ) LIMIT 3""", term)
+        FROM opportunities o WHERE o.is_deleted=FALSE AND o.company_id=$1 AND (
+            o.title ILIKE $2 OR o.opp_number ILIKE $2 OR o.customer_name ILIKE $2
+        ) LIMIT 3""", company_id, term)
     results.extend([{**r, "url": f"/opportunities", "subtitle": f"{r['bid_number']} · {r.get('customer_name','')}"} for r in opps])
 
     # Search contracts
@@ -51,9 +52,9 @@ async def global_search(q: str = Query(..., min_length=2), conn=Depends(get_db),
                v.company_name AS customer_name, c.created_at
         FROM contracts c JOIN bids b ON c.bid_id=b.bid_id
         JOIN vendors v ON c.vendor_id=v.vendor_id
-        WHERE c.is_deleted=FALSE AND (
-            c.contract_number ILIKE $1 OR b.bid_title ILIKE $1 OR v.company_name ILIKE $1
-        ) LIMIT 3""", term)
+        WHERE c.is_deleted=FALSE AND c.company_id=$1 AND (
+            c.contract_number ILIKE $2 OR b.bid_title ILIKE $2 OR v.company_name ILIKE $2
+        ) LIMIT 3""", company_id, term)
     results.extend([{**r, "url": f"/contracts", "subtitle": f"{r['bid_number']} · {r.get('customer_name','')}"} for r in contracts])
 
     # Sort by created_at
@@ -68,8 +69,9 @@ async def search_bids(
     budget_min: Optional[float]=None, budget_max: Optional[float]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
     """Advanced bid search with all filters."""
-    conditions = ["b.is_deleted=FALSE"]
-    args = []
+    company_id = require_company(current_user)
+    conditions = ["b.is_deleted=FALSE", "b.company_id=$1"]
+    args = [company_id]
     if q:
         args.append(f"%{q}%")
         conditions.append(f"(b.bid_title ILIKE ${len(args)} OR b.bid_number ILIKE ${len(args)} OR b.customer_name ILIKE ${len(args)})")

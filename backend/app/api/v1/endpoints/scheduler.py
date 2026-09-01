@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends
-from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val
+from fastapi import APIRouter, Depends, HTTPException
+from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, require_company
 from app.middleware.auth import require_roles, get_current_user, CurrentUser
 from app.services.email_service import (
     send_deadline_reminder, send_bid_notification, send_bond_reminder
@@ -21,7 +21,12 @@ async def send_deadline_reminders(
     Handles:
       1. Standard bid submission deadline reminders (7-day window)
       2. Bid bond reminders (6 days before submission deadline) when bond_required=TRUE
+
+    Scoped to the calling admin's own company — this is triggered per-tenant
+    via the API, not a platform-wide cron, so it must not read or notify
+    across other companies' data.
     """
+    company_id = require_company(current_user)
     results = {"bid_reminders_sent": 0, "bond_reminders_sent": 0, "errors": []}
 
     # ── 1. Standard bid deadline reminders ────────────────────────────────────
@@ -32,10 +37,10 @@ async def send_deadline_reminders(
         FROM bids b
         JOIN users u ON b.created_by = u.user_id
         JOIN bid_statuses bs ON b.status_id = bs.status_id
-        WHERE b.is_deleted = FALSE
+        WHERE b.is_deleted = FALSE AND b.company_id = $1
           AND bs.status_code IN ('OPEN','PUBLISHED','PENDING_APPROVAL')
           AND b.submission_deadline BETWEEN NOW() AND NOW() + INTERVAL '7 days'
-        ORDER BY b.submission_deadline""")
+        ORDER BY b.submission_deadline""", company_id)
 
     for bid in upcoming_bids:
         if bid["email"] and bid["days_left"] is not None:
@@ -45,12 +50,12 @@ async def send_deadline_reminders(
             if ok:
                 results["bid_reminders_sent"] += 1
                 await execute(conn,
-                    """INSERT INTO notifications (user_id, notif_type, title, body, related_bid)
-                       VALUES ($1, 'DEADLINE_REMINDER', $2, $3, $4)""",
+                    """INSERT INTO notifications (user_id, notif_type, title, body, related_bid, company_id)
+                       VALUES ($1, 'DEADLINE_REMINDER', $2, $3, $4, $5)""",
                     bid["user_id"],
                     f"Deadline reminder: {bid['bid_number']}",
                     f"{bid['days_left']} days until submission deadline",
-                    bid["bid_id"])
+                    bid["bid_id"], company_id)
 
     # ── 2. Bond reminders — 6 days before submission deadline ─────────────────
     bond_opps = await fetch_all(conn, """
@@ -64,13 +69,13 @@ async def send_deadline_reminders(
         FROM opportunities_v2 o
         LEFT JOIN users bp ON (o.bid_manager_id = bp.user_id OR o.sales_rep_id = bp.user_id)
         LEFT JOIN users mgr ON o.manager_id = mgr.user_id
-        WHERE o.is_deleted = FALSE
+        WHERE o.is_deleted = FALSE AND o.company_id = $1
           AND o.bond_required = TRUE
           AND o.bond_reminder_sent = FALSE
           AND o.status NOT IN ('WON','LOST','DROPPED','CANCELLED')
           AND o.submission_deadline IS NOT NULL
           AND EXTRACT(DAY FROM o.submission_deadline - NOW())::INT BETWEEN 0 AND 6
-        ORDER BY o.submission_deadline""")
+        ORDER BY o.submission_deadline""", company_id)
 
     for opp in bond_opps:
         days_left = opp["days_left"]
@@ -96,12 +101,12 @@ async def send_deadline_reminders(
                 # In-app notification for bid person
                 await execute(conn,
                     """INSERT INTO notifications
-                       (user_id, notif_type, title, body)
-                       VALUES ($1, 'BOND_REMINDER', $2, $3)""",
+                       (user_id, notif_type, title, body, company_id)
+                       VALUES ($1, 'BOND_REMINDER', $2, $3, $4)""",
                     opp["bid_person_id"],
                     f"⚠️ Bond Required: {opp['opp_number']}",
                     f"Please request the bid bond for {opp['customer_name']}. "
-                    f"Submission deadline is in {days_left} day(s).")
+                    f"Submission deadline is in {days_left} day(s).", company_id)
 
         # Send to manager (separate email with manager-tone)
         if opp["manager_email"] and opp["manager_user_id"] != opp["bid_person_id"]:
@@ -119,18 +124,18 @@ async def send_deadline_reminders(
                 # In-app notification for manager
                 await execute(conn,
                     """INSERT INTO notifications
-                       (user_id, notif_type, title, body)
-                       VALUES ($1, 'BOND_REMINDER_MGR', $2, $3)""",
+                       (user_id, notif_type, title, body, company_id)
+                       VALUES ($1, 'BOND_REMINDER_MGR', $2, $3, $4)""",
                     opp["manager_user_id"],
                     f"⚠️ [Manager] Bond Required: {opp['opp_number']}",
                     f"Bond request needed for {opp['customer_name']} — "
-                    f"{days_left} day(s) until submission deadline.")
+                    f"{days_left} day(s) until submission deadline.", company_id)
 
         # Mark as reminded so we don't send again
         if any_sent:
             await execute(conn,
-                "UPDATE opportunities_v2 SET bond_reminder_sent=TRUE, bond_reminder_sent_at=NOW() WHERE opp_id=$1",
-                opp["opp_id"])
+                "UPDATE opportunities_v2 SET bond_reminder_sent=TRUE, bond_reminder_sent_at=NOW() WHERE opp_id=$1 AND company_id=$2",
+                opp["opp_id"], company_id)
 
     logger.info(f"Scheduler run: {results}")
     return {
@@ -150,6 +155,7 @@ async def check_bond_reminders(
     Dry-run: shows which opportunities would receive bond reminders right now.
     Does NOT send anything.
     """
+    company_id = require_company(current_user)
     pending = await fetch_all(conn, """
         SELECT o.opp_id, o.opp_number, o.customer_name, o.submission_deadline,
                EXTRACT(DAY FROM o.submission_deadline - NOW())::INT AS days_left,
@@ -159,11 +165,11 @@ async def check_bond_reminders(
         FROM opportunities_v2 o
         LEFT JOIN users bp ON (o.bid_manager_id = bp.user_id OR o.sales_rep_id = bp.user_id)
         LEFT JOIN users mgr ON o.manager_id = mgr.user_id
-        WHERE o.is_deleted = FALSE
+        WHERE o.is_deleted = FALSE AND o.company_id = $1
           AND o.bond_required = TRUE
           AND o.status NOT IN ('WON','LOST','DROPPED','CANCELLED')
           AND o.submission_deadline IS NOT NULL
-        ORDER BY o.submission_deadline""")
+        ORDER BY o.submission_deadline""", company_id)
 
     return {
         "total_bond_required": len(pending),
@@ -179,9 +185,13 @@ async def notify_bid_event(
     conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN","PROCUREMENT"))):
     """Send email notification to all users assigned to a bid."""
+    company_id = require_company(current_user)
     bid_id = body.get("bid_id")
     subject = body.get("subject", "TeleBid Notification")
     message = body.get("message", "")
+    bid_row = await fetch_one(conn, "SELECT bid_number FROM bids WHERE bid_id=$1 AND company_id=$2", bid_id, company_id)
+    if not bid_row:
+        raise HTTPException(status_code=404, detail="Bid not found")
     users = await fetch_all(conn, """
         SELECT DISTINCT u.user_id, u.email, u.full_name
         FROM users u
@@ -189,9 +199,8 @@ async def notify_bid_event(
             SELECT created_by FROM bids WHERE bid_id=$1
             UNION SELECT approver_id FROM approvals WHERE bid_id=$1
             UNION SELECT evaluator_id FROM bid_evaluations WHERE bid_id=$1
-        ) AND u.is_active=TRUE""", bid_id)
-    bid_row = await fetch_one(conn, "SELECT bid_number FROM bids WHERE bid_id=$1", bid_id)
-    bnr = bid_row["bid_number"] if bid_row else ""
+        ) AND u.is_active=TRUE AND u.company_id=$2""", bid_id, company_id)
+    bnr = bid_row["bid_number"]
     sent = 0
     for u in users:
         if u["email"]:
@@ -199,6 +208,6 @@ async def notify_bid_event(
             if ok:
                 sent += 1
                 await execute(conn,
-                    "INSERT INTO notifications (user_id,notif_type,title,body,related_bid) VALUES ($1,'BID_EVENT',$2,$3,$4)",
-                    u["user_id"], subject, message, bid_id)
+                    "INSERT INTO notifications (user_id,notif_type,title,body,related_bid,company_id) VALUES ($1,'BID_EVENT',$2,$3,$4,$5)",
+                    u["user_id"], subject, message, bid_id, company_id)
     return {"message": f"Notified {sent} users"}
