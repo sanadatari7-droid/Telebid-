@@ -76,7 +76,7 @@ async def add_criterion(tmpl_id: int, body: CriterionCreate, conn=Depends(get_db
     total_weight = await fetch_val(conn,
         "SELECT COALESCE(SUM(weight),0) FROM evaluation_criteria WHERE tmpl_id=$1 AND crit_type=$2",
         tmpl_id, body.crit_type)
-    if total_weight + body.weight > 100:
+    if float(total_weight) + body.weight > 100:
         raise HTTPException(status_code=400, detail=f"Total {body.crit_type} weight cannot exceed 100%")
     await execute(conn,
         """INSERT INTO evaluation_criteria (tmpl_id,crit_name,crit_type,weight,max_score,description,sort_order)

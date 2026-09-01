@@ -136,19 +136,16 @@ export const vendorsApi = {
 
 // ── EVALUATIONS ───────────────────────────────────────────────────────────────
 export const evalApi = {
-  getTemplates:  () => api.get("/evaluations/templates"),
-  getTemplate:   id => api.get(`/evaluations/templates/${id}`),
-  createTemplate:d => api.post("/evaluations/templates", d),
-  list:          p => api.get("/evaluations", { params: p }),
-  get:           id => api.get(`/evaluations/${id}`),
-  create:        d => api.post("/evaluations", d),
-  submit:        id => api.post(`/evaluations/${id}/submit`),
-  getMyEval:      id => api.get(`/evaluations/${id}/my-eval`),
-  saveScore:      (id, d) => api.post(`/evaluations/${id}/scores`, d),
-  submitEval:     id => api.post(`/evaluations/${id}/submit`),
-  getEvaluators:  id => api.get(`/evaluations/${id}/evaluators`),
-  assignEvaluator:(id, d) => api.post(`/evaluations/${id}/evaluators`, d),
-  getResults:     id => api.get(`/evaluations/${id}/results`),
+  getTemplates:   () => api.get("/evaluations/templates"),
+  getTemplate:    id => api.get(`/evaluations/templates/${id}`),
+  createTemplate: d => api.post("/evaluations/templates", d),
+  list:           () => api.get("/evaluations"),
+  getMyEval:      bidId => api.get(`/evaluations/bids/${bidId}/my-evaluation`),
+  saveScore:      (bidId, d) => api.post(`/evaluations/bids/${bidId}/score`, d),
+  submitEval:     (bidId, d) => api.post(`/evaluations/bids/${bidId}/submit`, d),
+  getEvaluators:  bidId => api.get(`/evaluations/bids/${bidId}/evaluators`),
+  assignEvaluator:(bidId, d) => api.post(`/evaluations/bids/${bidId}/assign`, d),
+  getResults:     bidId => api.get(`/evaluations/bids/${bidId}/results`),
   addCriterion:   (id, d) => api.post(`/evaluations/templates/${id}/criteria`, d),
   deleteCriterion:(tid, cid) => api.delete(`/evaluations/templates/${tid}/criteria/${cid}`),
 }
@@ -226,7 +223,7 @@ export const reportsApi = {
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 export const settingsApi = {
-  getAll:              () => api.get("/settings"),
+  getAll:              params => api.get("/settings", { params }),
   set:                 (key, value) => api.post("/settings", { setting_key: key, setting_value: value }),
   getDropdown:         key => api.get(`/settings/dropdowns/${key}`),
   getDropdownKeys:     () => api.get("/settings/dropdowns"),
@@ -258,10 +255,9 @@ export const watchlistApi = {
 
 // ── COMMENTS ──────────────────────────────────────────────────────────────────
 export const commentsApi = {
-  list:   (entity, id) => api.get(`/comments/${entity}/${id}`),
-  create: d => api.post("/comments", d),
+  list:   bidId => api.get(`/comments/bid/${bidId}`),
+  add:    (bidId, d) => api.post(`/comments/bid/${bidId}`, d),
   delete: id => api.delete(`/comments/${id}`),
-  add: d => api.post("/comments", d),
 }
 
 // ── ICT ───────────────────────────────────────────────────────────────────────
@@ -305,7 +301,7 @@ export const searchApi = {
 
 // ── LOCATION ──────────────────────────────────────────────────────────────────
 export const locationApi = {
-  geocode: address => api.get("/location/geocode", { params: { address } }),
+  geocode: query => api.post("/location/geocode", { query }),
 }
 
 // ── EXCEL IMPORT ──────────────────────────────────────────────────────────────

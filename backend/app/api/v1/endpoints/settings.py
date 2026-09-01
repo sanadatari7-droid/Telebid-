@@ -81,7 +81,7 @@ async def get_company(conn=Depends(get_db), current_user=Depends(get_current_use
 async def update_company(body: dict, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
     allowed = ["company_name","company_name_ar","address","city","country","phone","email","website","industry"]
-    updates = ["updated_at=NOW()"] if False else []
+    updates = ["updated_at=NOW()"]
     args = []
     for k, v in body.items():
         if k in allowed:

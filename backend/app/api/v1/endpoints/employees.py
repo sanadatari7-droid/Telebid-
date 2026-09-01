@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from app.db.postgres import get_db, fetch_all, fetch_one, execute
 from app.middleware.auth import get_current_user, require_roles, CurrentUser

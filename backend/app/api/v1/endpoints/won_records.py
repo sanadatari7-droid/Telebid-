@@ -37,6 +37,7 @@ class WonComplete(BaseModel):
 
 
 class WonUpdate(BaseModel):
+    po_number: Optional[str] = None
     po_date: Optional[date] = None
     order_number: Optional[str] = None
     order_summary: Optional[str] = None
@@ -155,8 +156,9 @@ async def create_won_from_opportunity(
             $42, 'ACTIVE'
         )""",
         opp_id, won_number,
-        # Copied
-        opp.get("expro_ref"), opp.get("rfp_ref"), opp.get("customer_name"), opp.get("customer_name_ar"),
+        # Copied — po_number isn't known yet at WON time (the customer hasn't
+        # issued one); it's populated later via the update endpoint.
+        opp.get("expro_ref"), None, opp.get("customer_name"), opp.get("customer_name_ar"),
         opp.get("customer_id"), opp.get("customer_ref"), opp.get("media_type"), opp.get("sla_type"),
         opp.get("bandwidth_mbps"), opp.get("quantity"), opp.get("sow_detail"), opp.get("solution_detail"),
         opp.get("family_id"), opp.get("solution_id"), opp.get("nrc"), opp.get("mrc"), opp.get("tcv"), opp.get("currency_id"),
@@ -314,7 +316,7 @@ async def update_won_record(
     won = await fetch_one(conn, "SELECT * FROM won_records WHERE won_id = $1", won_id)
     if not won: raise HTTPException(status_code=404)
 
-    allowed = ["po_date","order_number","order_summary","discount_applied",
+    allowed = ["po_number","po_date","order_number","order_summary","discount_applied",
                "invoice_status","invoice_number","invoice_date","invoice_amount",
                "payment_terms","bid_person_notes","won_status"]
     updates = ["updated_at=NOW()", f"completed_by={current_user.user_id}", "completed_at=NOW()"]

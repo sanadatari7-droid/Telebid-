@@ -34,6 +34,7 @@ function WonDetailModal({ wonId, onClose }) {
 
   React.useEffect(() => {
     if (won && !editing) setForm({
+      po_number: won.po_number || "",
       po_date: won.po_date || "",
       order_number: won.order_number || "",
       order_summary: won.order_summary || "",
@@ -176,6 +177,10 @@ function WonDetailModal({ wonId, onClose }) {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
+                        <label className="label">PO Number</label>
+                        <input name="po_number" className="input" value={form.po_number} onChange={fc}/>
+                      </div>
+                      <div>
                         <label className="label">Order Number</label>
                         <input name="order_number" className="input" value={form.order_number} onChange={fc}/>
                       </div>
@@ -239,6 +244,7 @@ function WonDetailModal({ wonId, onClose }) {
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {[
                       ["Won Date",      won?.won_date ? fmt(won.won_date) : null],
+                      ["PO Number",     won?.po_number],
                       ["PO Date",       won?.po_date ? fmt(won.po_date) : null],
                       ["Order #",       won?.order_number],
                       ["Discount",      won?.discount_applied ? `${won.discount_applied}%` : null],
