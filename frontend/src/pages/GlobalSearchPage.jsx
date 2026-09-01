@@ -5,6 +5,7 @@ import { fmt } from "../utils/fmt"
 import clsx from "clsx"
 import { Search, FileText, Building2, Briefcase, Trophy, Loader } from "lucide-react"
 
+const ENTITY_PLURAL = { bid:"bids", vendor:"vendors", opportunity:"opportunities", contract:"contracts" }
 const ENTITY_ICONS = { bid:FileText, vendor:Building2, opportunity:Briefcase, contract:Trophy }
 const ENTITY_COLORS = { bid:"text-primary-600 bg-primary-50", vendor:"text-green-600 bg-green-50", opportunity:"text-amber-600 bg-amber-50", contract:"text-purple-600 bg-purple-50" }
 
@@ -56,7 +57,7 @@ export default function GlobalSearchPage() {
             <div className="flex gap-2 text-xs text-gray-400">
               {["bid","vendor","opportunity","contract"].map(type => {
                 const count = results.results.filter(r => r.entity_type===type).length
-                return count>0 ? <span key={type} className="badge-gray">{count} {type}s</span> : null
+                return count>0 ? <span key={type} className="badge-gray">{count} {count===1?type:ENTITY_PLURAL[type]}</span> : null
               })}
             </div>
           </div>

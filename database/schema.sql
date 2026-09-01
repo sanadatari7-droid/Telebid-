@@ -493,7 +493,8 @@ CREATE TABLE IF NOT EXISTS dropdown_configs (
     option_label_ar VARCHAR(200),
     sort_order    INT DEFAULT 0,
     is_active     BOOLEAN DEFAULT TRUE,
-    created_at    TIMESTAMPTZ DEFAULT NOW()
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (company_id, dropdown_key, option_value)
 );
 
 -- ============================================================
@@ -1434,12 +1435,9 @@ ALTER TABLE employees
     ADD COLUMN IF NOT EXISTS sectors_covered TEXT,
     ADD COLUMN IF NOT EXISTS employee_type2  VARCHAR(20);
 
-INSERT INTO dropdown_configs (company_id, dropdown_key, dropdown_label, option_value, option_label, sort_order) VALUES
-    (1,'explored_status','Explored Status','PENDING','Pending',1),
-    (1,'explored_status','Explored Status','LOST_FINANCIALLY','Lost Financially',2),
-    (1,'explored_status','Explored Status','LOST_TECHNICAL','Lost Technical',3),
-    (1,'explored_status','Explored Status','WON','Won',4)
-ON CONFLICT DO NOTHING;
+-- explored_status options are already seeded above (dropdown_configs UNIQUE
+-- constraint on company_id/dropdown_key/option_value makes re-seeding here
+-- a safe no-op, so this duplicate block was removed rather than kept).
 
 -- Ensure admin has OTP disabled by default (enable after configuring SMTP)
 UPDATE users SET otp_enabled=FALSE WHERE username='admin';
