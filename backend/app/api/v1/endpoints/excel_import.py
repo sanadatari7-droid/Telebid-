@@ -133,11 +133,11 @@ async def import_eval_criteria(body: dict, conn=Depends(get_db),
                 crit_type = "TECHNICAL"
 
             await execute(conn,
-                """INSERT INTO evaluation_criteria (tmpl_id, crit_name, crit_type, weight, max_score, description, sort_order)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+                """INSERT INTO evaluation_criteria (tmpl_id, crit_name, crit_type, weight, max_score, description, sort_order, company_id)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
                 tmpl_id, field_name, crit_type, weight, max_score,
                 str(row.get(mapping.get("description",""), "") or ""),
-                i)
+                i, company_id)
 
             # Store dropdown values if present
             dropdown_col = mapping.get("dropdown_values","")

@@ -176,8 +176,8 @@ async def _issue_tokens(conn, user: dict) -> dict:
 
     try:
         await execute(conn, """
-            INSERT INTO audit_logs (user_id, username, action, module)
-            VALUES ($1, $2, 'LOGIN', 'AUTH')""", uid, user["username"])
+            INSERT INTO audit_logs (user_id, username, action, module, company_id)
+            VALUES ($1, $2, 'LOGIN', 'AUTH', $3)""", uid, user["username"], user.get("company_id"))
     except Exception:
         pass  # Don't fail login if audit log write fails
 

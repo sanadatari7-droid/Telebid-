@@ -190,10 +190,11 @@ async def create_won_from_opportunity(
 
     # 8. In-app notification
     await execute(conn,
-        "INSERT INTO notifications (user_id, notif_type, title, body) VALUES ($1, 'OPP_WON', $2, $3)",
+        "INSERT INTO notifications (user_id, notif_type, title, body, company_id) VALUES ($1, 'OPP_WON', $2, $3, $4)",
         current_user.user_id,
         f"🎉 Won: {opp['customer_name']}",
-        f"Opportunity {opp.get('opp_number')} marked as WON. Record {won_number} created.")
+        f"Opportunity {opp.get('opp_number')} marked as WON. Record {won_number} created.",
+        company_id)
 
     return {
         "won_id": won_id,
