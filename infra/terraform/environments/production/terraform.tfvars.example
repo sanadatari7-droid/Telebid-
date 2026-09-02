@@ -1,0 +1,29 @@
+# Copy this to terraform.tfvars (gitignored) and fill in real values before
+# `terraform apply`. See ../../../README.md for the full walkthrough.
+
+aws_region  = "us-east-1"
+name_prefix = "telebid-production"
+
+# S3 bucket names are global across ALL AWS accounts — change this to
+# something unique to you before first apply.
+frontend_bucket_name = "telebid-production-frontend-CHANGE-ME"
+
+github_repo = "sanadatari7-droid/Telebid-"
+
+# ── Secrets — better set via `aws secretsmanager put-secret-value` after
+# apply than committed here even in a gitignored file, but Terraform needs
+# *some* initial value to create the secret with. Leave blank for the
+# app's existing graceful-degradation behavior (SMTP blank = OTP codes
+# returned in the API response instead of emailed; Anthropic blank =
+# AI Bid/No-Bid Advisor feature disabled, everything else unaffected).
+smtp_host         = ""
+smtp_user         = ""
+smtp_password     = ""
+anthropic_api_key = ""
+
+# ── Two-phase apply: leave these on their defaults for the FIRST apply.
+# After it finishes, run `terraform output cloudfront_domain_name`, then
+# uncomment and fill in the real value below, and `terraform apply` again.
+# frontend_url = "https://dXXXXXXXXXXXXX.cloudfront.net"
+# app_base_url = "https://dXXXXXXXXXXXXX.cloudfront.net"
+# cors_origins = "[\"https://dXXXXXXXXXXXXX.cloudfront.net\"]"

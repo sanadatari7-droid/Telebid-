@@ -1,0 +1,83 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "database/schema.sql"
+      - "infra/terraform/**"
+      - ".github/workflows/deploy-backend.yml"
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  # terraform.tfvars is deliberately gitignored (it holds secrets), so CI
+  # must supply the same variable values some other way or a CI-driven
+  # apply would silently revert them to their defaults. Terraform reads
+  # any TF_VAR_<name> environment variable automatically for a declared
+  # variable of that name — set these as repo Variables/Secrets (Settings
+  # -> Secrets and variables -> Actions) to match whatever you used in
+  # your local terraform.tfvars for the first apply. See infra/README.md.
+  TF_VAR_frontend_bucket_name: ${{ vars.FRONTEND_BUCKET_NAME }}
+  TF_VAR_frontend_url: ${{ vars.FRONTEND_URL }}
+  TF_VAR_app_base_url: ${{ vars.APP_BASE_URL }}
+  TF_VAR_cors_origins: ${{ vars.CORS_ORIGINS }}
+  TF_VAR_smtp_host: ${{ vars.SMTP_HOST }}
+  TF_VAR_smtp_user: ${{ vars.SMTP_USER }}
+  TF_VAR_smtp_password: ${{ secrets.SMTP_PASSWORD }}
+  TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        working-directory: backend
+        env:
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY_URL }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker push "$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform init
+        working-directory: infra/terraform/environments/production
+        run: terraform init
+
+      # Registers the new task-definition revision, runs the one-off
+      # schema-apply Fargate task (see modules/ecs/migrate.tf — idempotent,
+      # safe on every deploy), and updates the ECS service, all in the
+      # dependency order Terraform already knows.
+      - name: Terraform apply
+        working-directory: infra/terraform/environments/production
+        run: |
+          terraform apply -auto-approve -var "image_tag=${{ github.sha }}"
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --region "$AWS_REGION" \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_SERVICE_NAME }}"
