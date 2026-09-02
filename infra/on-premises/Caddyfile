@@ -1,0 +1,39 @@
+# Caddy config for the on-premises production deployment. Copied into the
+# frontend image by frontend/Dockerfile.prod. {$SITE_ADDRESS} comes from
+# .env.prod via docker-compose.prod.yml.
+#
+# Default mode below assumes SITE_ADDRESS is a real domain whose DNS
+# already points at this server — Caddy obtains and renews a Let's
+# Encrypt certificate automatically, no further config needed.
+#
+# LAN-only / no public domain? See the "LAN-only / no domain" section in
+# ../README.md — it's a one-line addition to this file (a `tls internal`
+# directive) before you build the image, not a different file.
+
+{$SITE_ADDRESS} {
+	root * /srv
+	encode gzip
+
+	# Container health check target (docker-compose.prod.yml's frontend
+	# healthcheck hits this) — answered locally, never reaches the backend.
+	handle /health {
+		respond "OK" 200
+	}
+
+	# Same-origin API proxy — the frontend's api.js hardcodes a relative
+	# "/api/v1" base URL, so this must live behind the same address the
+	# browser loaded the page from, exactly like the dev nginx.conf this
+	# mirrors and the AWS CloudFront design's /api/* behavior.
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Everything else: serve the built SPA, falling back to index.html for
+	# client-side routes (react-router) that aren't real files on disk.
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

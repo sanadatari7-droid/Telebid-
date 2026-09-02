@@ -1,0 +1,138 @@
+# Production, on-premises deployment. Run with:
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# --env-file is required (not optional) — DATABASE_URL, CORS_ORIGINS, and
+# FRONTEND_URL/APP_BASE_URL below are composed from ${POSTGRES_PASSWORD}
+# and ${SITE_ADDRESS}, which only resolve when the file supplying them is
+# passed explicitly. See infra/on-premises/README.md for the full setup.
+#
+# This is a separate, hardened path from the repo's docker-compose.yml
+# (which stays as the local dev setup, untouched): no secrets hardcoded
+# here, no ports published except the edge server's 80/443, and an
+# automatic-HTTPS reverse proxy in front of everything.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: telebid-postgres
+    environment:
+      POSTGRES_DB: telebid
+      POSTGRES_USER: telebid
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telebid -d telebid"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - telebid-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+    # No ports: block — Postgres is reachable only from other containers
+    # on telebid-net, never from the host network.
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: telebid-api
+    env_file:
+      - .env.prod
+    environment:
+      # Composed here rather than duplicated in .env.prod — one password,
+      # one place. Requires `--env-file .env.prod` on every compose
+      # command (see header comment).
+      DATABASE_URL: postgresql://telebid:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}@postgres:5432/telebid
+      FRONTEND_URL: https://${SITE_ADDRESS:?set SITE_ADDRESS in .env.prod}
+      APP_BASE_URL: https://${SITE_ADDRESS:?set SITE_ADDRESS in .env.prod}
+      CORS_ORIGINS: '["https://${SITE_ADDRESS:?set SITE_ADDRESS in .env.prod}"]'
+    volumes:
+      - upload_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - telebid-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    # No ports: block — the backend is reachable only via the frontend's
+    # reverse proxy, never directly from the host network.
+
+  frontend:
+    build:
+      # Repo root, not ./frontend — Dockerfile.prod also needs to COPY
+      # infra/on-premises/Caddyfile, which is outside ./frontend.
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+    container_name: telebid-frontend
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env.prod}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Caddy's own state: issued certs (data) and its config cache
+      # (config) — must persist across restarts or it re-issues/re-checks
+      # certs unnecessarily and can hit Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - telebid-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
+volumes:
+  postgres_data:
+  upload_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  telebid-net:
+    driver: bridge

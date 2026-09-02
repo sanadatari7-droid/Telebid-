@@ -1,0 +1,19 @@
+# Production on-premises image — Caddy instead of nginx for automatic
+# HTTPS. The dev Dockerfile (nginx-based) is untouched; this is a
+# separate, parallel build used only by docker-compose.prod.yml.
+#
+# Built with the repo root as context (not ./frontend) so it can also
+# COPY the Caddyfile from infra/on-premises/ — see the frontend service's
+# `build:` block in ../docker-compose.prod.yml.
+
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY frontend/package.json ./
+RUN npm install
+COPY frontend/. .
+RUN npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /app/dist /srv
+COPY infra/on-premises/Caddyfile /etc/caddy/Caddyfile
+EXPOSE 80 443

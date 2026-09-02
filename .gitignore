@@ -38,3 +38,8 @@ Thumbs.db
 !*.tfvars.example
 crash.log
 crash.*.log
+
+# On-premises deployment
+.env.prod
+!.env.prod.example
+backups/
