@@ -8,7 +8,7 @@ import {
   Users, Bell, LogOut, Search, ChevronDown, BookOpen, Shield,
   Calendar, Eye, History, Globe, Building2, Radio, Antenna,
   Monitor, FileSpreadsheet, Briefcase, Layers, MapPin, X,
-  ChevronRight, TrendingUp, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark
+  ChevronRight, TrendingUp, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark, Sparkles
 } from "lucide-react"
 import clsx from "clsx"
 
@@ -30,6 +30,7 @@ const NAV_SECTIONS = [
       { label: "ICT Projects",        path: "/ict",          icon: Monitor },
       { label: "Bonds",               path: "/bonds",        icon: Landmark },
       { label: "Won Records",        path: "/won-records",  icon: Trophy },
+      { label: "AI Alerts",           path: "/ai-alerts",    icon: Sparkles },
       { label: "Opportunities",       path: "/opportunities",icon: TrendingUp },
       { label: "Invitations",         path: "/invitations",  icon: Bell },
     ]

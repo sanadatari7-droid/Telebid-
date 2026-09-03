@@ -165,3 +165,54 @@ async def send_bond_reminder(to: str, full_name: str, opp_number: str, customer_
 
     text = f"Bond reminder for {opp_number} - {customer_name}. Submission deadline: {submission_deadline}. {days_left} days remaining. {action_text}"
     return await send_email(to, subject, html, text)
+
+
+SEVERITY_STYLE = {
+    "CRITICAL": ("#dc2626", "🔴"),
+    "HIGH":     ("#f59e0b", "🟠"),
+    "MEDIUM":   ("#3b82f6", "🟡"),
+    "LOW":      ("#6b7280", "⚪"),
+}
+
+async def send_ai_alert_email(to: str, full_name: str, headline: str, reason: str,
+                               recommended_action: str, severity: str, opp_number: str,
+                               customer_name: str, ai_generated: bool = True) -> bool:
+    """AI Alert Watchdog email — delivered through the standard SMTP pipeline
+    above, which can be pointed at Outlook/Office 365's SMTP relay via
+    SMTP_HOST=smtp.office365.com (see .env / system_settings EMAIL category)."""
+    color, dot = SEVERITY_STYLE.get(severity, SEVERITY_STYLE["MEDIUM"])
+    source_tag = "AI-Triaged Alert" if ai_generated else "Automated Alert (rule-based)"
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
+      <div style="background:{color};padding:22px;border-radius:12px 12px 0 0;text-align:center">
+        <div style="font-size:28px">{dot}</div>
+        <h1 style="color:white;margin:6px 0 0;font-size:19px">{headline}</h1>
+        <p style="color:rgba(255,255,255,.85);margin:4px 0 0;font-size:11px;letter-spacing:.5px;text-transform:uppercase">{source_tag} · {severity}</p>
+      </div>
+      <div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
+        <p style="color:#374151;font-size:15px">Hello <strong>{full_name}</strong>,</p>
+
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin:14px 0">
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;width:40%">Opportunity #</td>
+                <td style="padding:6px 0;font-weight:bold;color:#111827">{opp_number}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;border-top:1px solid #f3f4f6">Customer</td>
+                <td style="padding:6px 0;font-weight:bold;color:#111827;border-top:1px solid #f3f4f6">{customer_name}</td></tr>
+          </table>
+        </div>
+
+        <p style="color:#374151;margin:14px 0 4px;font-size:13px;font-weight:bold">Why this was flagged</p>
+        <p style="color:#4b5563;font-size:14px;margin:0 0 14px">{reason}</p>
+
+        <div style="background:#eff6ff;border-left:4px solid {color};padding:12px;border-radius:4px;margin:14px 0">
+          <strong style="color:#1e4080;font-size:13px">Recommended action:</strong>
+          <span style="color:#374151;font-size:13px"> {recommended_action}</span>
+        </div>
+
+        <p style="color:#6b7280;font-size:12px;margin-top:20px">Login to TeleBid Enterprise to review and act.</p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+        <p style="color:#9ca3af;font-size:11px;text-align:center">TeleBid Enterprise · AI Alert Watchdog</p>
+      </div>
+    </div>"""
+    text = f"{headline}\n\n{opp_number} — {customer_name}\n\nWhy: {reason}\n\nRecommended action: {recommended_action}"
+    return await send_email(to, f"[TeleBid Alert] {headline}", html, text)

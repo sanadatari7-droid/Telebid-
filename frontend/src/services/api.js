@@ -334,6 +334,12 @@ export const bondsApi = {
   stats:   () => api.get("/bonds/stats/summary"),
 }
 
+// ── AI ALERTS (scheduler) ─────────────────────────────────────────────────────
+export const aiAlertsApi = {
+  list: p => api.get("/scheduler/ai-alerts", { params: p }),
+  scan: () => api.post("/scheduler/scan-ai-alerts"),
+}
+
 // ── SERVICE CATEGORIES ────────────────────────────────────────────────────────
 export const serviceCatsApi = {
   list:   p => api.get("/service-categories", { params: p }),

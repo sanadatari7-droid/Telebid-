@@ -4,6 +4,7 @@ from app.middleware.auth import require_roles, get_current_user, CurrentUser
 from app.services.email_service import (
     send_deadline_reminder, send_bid_notification, send_bond_reminder
 )
+from app.services import ai_alert_engine
 import logging
 from datetime import datetime
 
@@ -211,3 +212,60 @@ async def notify_bid_event(
                     "INSERT INTO notifications (user_id,notif_type,title,body,related_bid,company_id) VALUES ($1,'BID_EVENT',$2,$3,$4,$5)",
                     u["user_id"], subject, message, bid_id, company_id)
     return {"message": f"Notified {sent} users"}
+
+
+@router.post("/scan-ai-alerts")
+async def scan_ai_alerts(
+    conn=Depends(get_db),
+    current_user=Depends(require_roles("ADMIN"))):
+    """
+    Run the AI Alert Watchdog: scans this company's open opportunities for risk
+    signals (deadline closing in, stalled with no activity, no costing sheet
+    priced yet, high-value opportunity gone idle), asks Claude to decide which
+    ones genuinely warrant an alert, and emails the assigned bid manager /
+    sales rep / manager via the configured SMTP relay (point SMTP_HOST at
+    Outlook/Office 365's relay — smtp.office365.com:587 — to deliver via
+    Outlook; no separate integration needed).
+
+    Falls back to a deterministic rule (alert on every triggered signal) when
+    ANTHROPIC_API_KEY isn't set, so this still works without AI configured.
+    In production this should also be called on a daily schedule alongside
+    /send-deadline-reminders.
+    """
+    company_id = require_company(current_user)
+    result = await ai_alert_engine.scan(conn, company_id)
+    return {
+        "message": (
+            f"Scanned {result['candidates_found']} candidate opportunit"
+            f"{'y' if result['candidates_found']==1 else 'ies'}, sent {result['alerts_sent']} alert(s)"
+            f"{' (AI-triaged)' if result['ai_used'] else ' (rule-based — ANTHROPIC_API_KEY not set)'}."
+        ),
+        "details": result,
+    }
+
+
+@router.get("/ai-alerts")
+async def list_ai_alerts(
+    limit: int = 50,
+    conn=Depends(get_db),
+    current_user=Depends(get_current_user)):
+    """History of AI Alert Watchdog emails sent for this company, newest first."""
+    company_id = require_company(current_user)
+    rows = await fetch_all(conn, """
+        SELECT a.alert_id, a.opp_id, o.opp_number, o.customer_name, a.alert_type, a.severity,
+               a.headline, a.reason, a.recommended_action, a.ai_generated, a.recipients,
+               a.sent_ok, a.created_at
+        FROM ai_alerts a
+        LEFT JOIN opportunities_v2 o ON a.opp_id = o.opp_id
+        WHERE a.company_id = $1
+        ORDER BY a.created_at DESC
+        LIMIT $2
+    """, company_id, limit)
+    stats = await fetch_one(conn, """
+        SELECT COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE sent_ok) AS sent_ok,
+               COUNT(*) FILTER (WHERE ai_generated) AS ai_generated,
+               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') AS last_7_days
+        FROM ai_alerts WHERE company_id = $1
+    """, company_id)
+    return {"items": rows, "stats": stats}

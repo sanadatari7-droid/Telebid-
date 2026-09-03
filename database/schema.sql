@@ -1594,3 +1594,28 @@ CREATE TABLE IF NOT EXISTS opportunity_costing_lines (
 );
 CREATE INDEX IF NOT EXISTS idx_costing_lines_costing_id ON opportunity_costing_lines(costing_id);
 CREATE INDEX IF NOT EXISTS idx_costing_sheets_company_id ON opportunity_costing_sheets(company_id);
+
+-- ── AI Email Alerts ──────────────────────────────────────────────────────
+-- Records of AI-triggered alert emails (delivered via the existing SMTP
+-- pipeline, configured to relay through Outlook/Office 365 — see
+-- app/services/email_service.py). Each row is one alert the AI decided
+-- was worth sending for one opportunity, kept for history/audit and to
+-- de-duplicate — the scan won't re-alert the same opp+alert_type more than
+-- once in COOLDOWN_HOURS (see ai_alert_engine.py).
+CREATE TABLE IF NOT EXISTS ai_alerts (
+    alert_id        SERIAL PRIMARY KEY,
+    company_id      INT NOT NULL REFERENCES companies(company_id),
+    opp_id          INT REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    alert_type      VARCHAR(40) NOT NULL,   -- DEADLINE_RISK | STALLED | MISSING_COSTING | HIGH_VALUE_IDLE | ...
+    severity        VARCHAR(10) NOT NULL DEFAULT 'MEDIUM', -- LOW | MEDIUM | HIGH | CRITICAL
+    headline        VARCHAR(200) NOT NULL,
+    reason          TEXT NOT NULL,
+    recommended_action TEXT,
+    ai_generated    BOOLEAN NOT NULL DEFAULT FALSE,  -- false = rule-based fallback (Anthropic not configured)
+    recipients      TEXT,                   -- comma-separated emails actually notified
+    sent_ok         BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_alerts_company_id ON ai_alerts(company_id);
+CREATE INDEX IF NOT EXISTS idx_ai_alerts_opp_id ON ai_alerts(opp_id);
+CREATE INDEX IF NOT EXISTS idx_ai_alerts_created_at ON ai_alerts(created_at);

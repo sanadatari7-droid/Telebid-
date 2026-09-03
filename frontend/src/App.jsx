@@ -35,6 +35,7 @@ const LostRecordsPage = lazy(() => import("./pages/LostRecordsPage"))
 const CompanySettingsPage = lazy(() => import("./pages/CompanySettingsPage"))
 const BondsPage           = lazy(() => import("./pages/BondsPage"))
 const WonRecordsPage      = lazy(() => import("./pages/WonRecordsPage"))
+const AiAlertsPage        = lazy(() => import("./pages/AiAlertsPage"))
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null } }
@@ -109,6 +110,7 @@ export default function App() {
           <Route path="company-settings" element={<Page component={CompanySettingsPage}/>}/>
           <Route path="bonds"            element={<Page component={BondsPage}/>}/>
           <Route path="won-records"      element={<Page component={WonRecordsPage}/>}/>
+          <Route path="ai-alerts"        element={<Page component={AiAlertsPage}/>}/>
           <Route path="*"             element={<Navigate to="/dashboard" replace/>}/>
         </Route>
       </Routes>
