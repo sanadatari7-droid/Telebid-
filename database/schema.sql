@@ -1462,7 +1462,8 @@ CREATE TABLE IF NOT EXISTS opp_ai_insights (
     insight_id      SERIAL PRIMARY KEY,
     opp_id          INT NOT NULL REFERENCES opportunities_v2(opp_id),
     recommendation  VARCHAR(20) NOT NULL,   -- BID, NO_BID, CONDITIONAL_BID
-    confidence      INT,                    -- 0-100
+    confidence      INT,                    -- 0-100, confidence in the recommendation itself
+    win_probability INT,                    -- 0-100, estimated P(win) if this opportunity is bid
     key_strengths   TEXT,                   -- JSON-encoded string list
     key_risks       TEXT,                   -- JSON-encoded string list
     reasoning       TEXT,
@@ -1471,6 +1472,7 @@ CREATE TABLE IF NOT EXISTS opp_ai_insights (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_opp_ai_insights_opp ON opp_ai_insights(opp_id, created_at DESC);
+ALTER TABLE opp_ai_insights ADD COLUMN IF NOT EXISTS win_probability INT;
 
 -- ============================================================
 -- MULTI-TENANCY CONVERSION
@@ -1619,3 +1621,43 @@ CREATE TABLE IF NOT EXISTS ai_alerts (
 CREATE INDEX IF NOT EXISTS idx_ai_alerts_company_id ON ai_alerts(company_id);
 CREATE INDEX IF NOT EXISTS idx_ai_alerts_opp_id ON ai_alerts(opp_id);
 CREATE INDEX IF NOT EXISTS idx_ai_alerts_created_at ON ai_alerts(created_at);
+
+-- ── RFP Compliance Matrix ────────────────────────────────────────────────
+-- One row per requirement pulled from an opportunity's RFP text (pasted,
+-- via AI extraction) or added manually. Tracked to MET/NOT_MET/etc so a
+-- bid team can see exactly what's still outstanding before submission.
+CREATE TABLE IF NOT EXISTS opportunity_requirements (
+    requirement_id   SERIAL PRIMARY KEY,
+    opp_id           INT NOT NULL REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    company_id       INT NOT NULL REFERENCES companies(company_id),
+    category         VARCHAR(50) NOT NULL DEFAULT 'Other',
+    requirement_text TEXT NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED', -- NOT_STARTED | IN_PROGRESS | MET | NOT_MET | WAIVED
+    response         TEXT,
+    source           VARCHAR(10) NOT NULL DEFAULT 'MANUAL',      -- AI | MANUAL
+    sort_order       INT NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW(),
+    created_by       INT REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_opp_requirements_opp_id ON opportunity_requirements(opp_id);
+CREATE INDEX IF NOT EXISTS idx_opp_requirements_company_id ON opportunity_requirements(company_id);
+
+-- ── AI Content Library (RAG answer drafting) ─────────────────────────────
+-- Reusable Q&A snippets from past proposals. Retrieval uses pg_trgm
+-- similarity (already enabled at the top of this file) against `question`
+-- — no vector embeddings/extra infra needed for a library this size.
+CREATE TABLE IF NOT EXISTS content_library_items (
+    item_id       SERIAL PRIMARY KEY,
+    company_id    INT NOT NULL REFERENCES companies(company_id),
+    question      TEXT NOT NULL,
+    answer        TEXT NOT NULL,
+    category      VARCHAR(50) DEFAULT 'Other',
+    tags          VARCHAR(300),
+    times_used    INT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ DEFAULT NOW(),
+    created_by    INT REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_content_library_company_id ON content_library_items(company_id);
+CREATE INDEX IF NOT EXISTS idx_content_library_question_trgm ON content_library_items USING gin (question gin_trgm_ops);

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { oppsV2Api, settingsApi, usersApi, serviceCatsApi, wonRecordsApi } from "../services/api"
+import { oppsV2Api, settingsApi, usersApi, serviceCatsApi, wonRecordsApi, contentLibraryApi } from "../services/api"
 import { exportToExcel } from "../utils/exportUtils"
 import { fmt } from "../utils/fmt"
 import { apiErrorMessage } from "../utils/apiError"
@@ -12,7 +12,7 @@ import {
   Download, Eye, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw,
   Users, MessageSquare, Settings2, Microscope, UserCheck, X, Send,
   Check, MoreHorizontal, Trash2, Reply, Lock, Calendar, User, Building2, Bell,
-  Sparkles, ThumbsUp, ThumbsDown, HelpCircle, Calculator
+  Sparkles, ThumbsUp, ThumbsDown, HelpCircle, Calculator, ListChecks, Wand2
 } from "lucide-react"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -602,6 +602,170 @@ function CostingPanel({ oppId }) {
   )
 }
 
+// ── RFP Compliance Matrix ────────────────────────────────────────────────────
+const REQ_STATUS_STYLE = {
+  NOT_STARTED: "bg-gray-100 text-gray-500",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  MET:         "bg-green-100 text-green-700",
+  NOT_MET:     "bg-red-100 text-red-700",
+  WAIVED:      "bg-purple-100 text-purple-700",
+}
+const REQ_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "MET", "NOT_MET", "WAIVED"]
+
+function CompliancePanel({ oppId }) {
+  const qc = useQueryClient()
+  const [rfpText, setRfpText] = useState("")
+  const [showExtract, setShowExtract] = useState(false)
+  const [manualText, setManualText] = useState("")
+  const [draftingId, setDraftingId] = useState(null)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["opp-requirements", oppId],
+    queryFn: () => oppsV2Api.getRequirements(oppId).then(r => r.data),
+  })
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["opp-requirements", oppId] })
+
+  const extractMut = useMutation({
+    mutationFn: () => oppsV2Api.extractRequirements(oppId, rfpText),
+    onSuccess: r => { toast.success(r.data.message); setRfpText(""); setShowExtract(false); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Extraction failed")),
+  })
+  const addMut = useMutation({
+    mutationFn: () => oppsV2Api.addRequirement(oppId, { requirement_text: manualText }),
+    onSuccess: () => { setManualText(""); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to add requirement")),
+  })
+  const updateMut = useMutation({
+    mutationFn: ({ reqId, patch }) => oppsV2Api.updateRequirement(oppId, reqId, patch),
+    onSuccess: invalidate,
+    onError: e => toast.error(apiErrorMessage(e, "Failed to update")),
+  })
+  const deleteMut = useMutation({
+    mutationFn: reqId => oppsV2Api.deleteRequirement(oppId, reqId),
+    onSuccess: invalidate,
+  })
+
+  const draftAnswer = async (req) => {
+    setDraftingId(req.requirement_id)
+    try {
+      const r = await contentLibraryApi.draftAnswer(req.requirement_text)
+      await oppsV2Api.updateRequirement(oppId, req.requirement_id, { response: r.data.answer })
+      toast.success(r.data.grounded ? "Draft generated from content library" : "Draft generated (limited library matches)")
+      invalidate()
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "AI draft failed"))
+    } finally {
+      setDraftingId(null)
+    }
+  }
+
+  if (isLoading) return <div className="skeleton h-48"/>
+  const items = data?.items || []
+  const summary = data?.summary || {}
+  const aiAvailable = data?.extraction_available
+
+  return (
+    <div className="space-y-4">
+      <div className="card-sm">
+        <div className="flex items-center justify-between">
+          <div className="section-title flex items-center gap-2"><ListChecks size={13}/> RFP Compliance Matrix</div>
+          <button className="btn-secondary btn-sm" disabled={!aiAvailable} title={!aiAvailable ? "Set ANTHROPIC_API_KEY on the backend to enable AI extraction" : undefined}
+            onClick={()=>setShowExtract(s=>!s)}>
+            <Sparkles size={13}/> {showExtract ? "Cancel" : "Extract from RFP Text"}
+          </button>
+        </div>
+
+        {!aiAvailable && (
+          <p className="text-xs text-gray-400 mt-2">
+            AI extraction and drafting are not configured on this server — set ANTHROPIC_API_KEY in the backend
+            environment to enable them. You can still add and track requirements manually below.
+          </p>
+        )}
+
+        {showExtract && (
+          <div className="mt-3 space-y-2">
+            <textarea className="input text-sm" rows={6} placeholder="Paste the RFP / tender text here — AI will pull out each requirement as a row below."
+              value={rfpText} onChange={e=>setRfpText(e.target.value)}/>
+            <button className="btn-primary btn-sm" disabled={!rfpText.trim() || extractMut.isPending} onClick={()=>extractMut.mutate()}>
+              {extractMut.isPending ? "Extracting…" : "Extract Requirements"}
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-2 flex-wrap mt-3">
+          {REQ_STATUSES.map(s => (
+            <span key={s} className={clsx("badge text-xs", REQ_STATUS_STYLE[s])}>{s.replace("_"," ")}: {summary[s] || 0}</span>
+          ))}
+        </div>
+      </div>
+
+      <div className="card-sm overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-gray-400 text-left border-b">
+              <th className="py-1.5 pr-2 w-24">Category</th>
+              <th className="py-1.5 pr-2">Requirement</th>
+              <th className="py-1.5 pr-2 w-32">Status</th>
+              <th className="py-1.5 pr-2">Response / Notes</th>
+              <th className="py-1.5 w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 && (
+              <tr><td colSpan={5} className="py-8 text-center text-gray-400">
+                No requirements yet — extract from pasted RFP text, or add one manually below.
+              </td></tr>
+            )}
+            {items.map(req => (
+              <tr key={req.requirement_id} className="border-b last:border-0 align-top">
+                <td className="py-1.5 pr-2">
+                  <span className="badge badge-gray text-[10px]">{req.category}</span>
+                  {req.source === "AI" && <div className="text-[10px] text-purple-500 mt-0.5">AI-extracted</div>}
+                </td>
+                <td className="py-1.5 pr-2 max-w-xs">{req.requirement_text}</td>
+                <td className="py-1.5 pr-2">
+                  <select className={clsx("input !py-1 !px-1.5 text-xs", REQ_STATUS_STYLE[req.status])}
+                    value={req.status}
+                    onChange={e => updateMut.mutate({ reqId: req.requirement_id, patch: { status: e.target.value } })}>
+                    {REQ_STATUSES.map(s => <option key={s} value={s}>{s.replace("_"," ")}</option>)}
+                  </select>
+                </td>
+                <td className="py-1.5 pr-2 max-w-sm">
+                  <textarea className="input !py-1 !px-2 text-xs w-full" rows={2} defaultValue={req.response || ""}
+                    onBlur={e => { if (e.target.value !== (req.response||"")) updateMut.mutate({ reqId: req.requirement_id, patch: { response: e.target.value } }) }}/>
+                  <button className="btn-ghost btn-sm !py-0.5 !px-1.5 mt-1 text-purple-600" disabled={!aiAvailable || draftingId===req.requirement_id}
+                    title={!aiAvailable ? "Set ANTHROPIC_API_KEY on the backend to enable AI drafting" : undefined}
+                    onClick={()=>draftAnswer(req)}>
+                    <Wand2 size={11}/> {draftingId===req.requirement_id ? "Drafting…" : "AI Draft"}
+                  </button>
+                </td>
+                <td className="py-1.5">
+                  <button className="text-gray-300 hover:text-red-500" onClick={()=>deleteMut.mutate(req.requirement_id)}>
+                    <Trash2 size={13}/>
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            <tr>
+              <td colSpan={2} className="py-1.5 pr-2">
+                <input className="input !py-1 !px-2 text-sm" placeholder="Add a requirement manually…"
+                  value={manualText} onChange={e=>setManualText(e.target.value)}
+                  onKeyDown={e=>{ if (e.key==="Enter" && manualText.trim()) addMut.mutate() }}/>
+              </td>
+              <td colSpan={3}>
+                <button className="btn-secondary btn-sm" disabled={!manualText.trim() || addMut.isPending} onClick={()=>addMut.mutate()}>
+                  <Plus size={13}/> Add
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ── AI Bid/No-Bid Advisor ────────────────────────────────────────────────────
 const AI_REC_STYLE = {
   BID:             { icon: ThumbsUp,   badge: "badge-green", label: "BID" },
@@ -669,8 +833,24 @@ function AiAdvisorPanel({ oppId }) {
             <span className={clsx("badge text-sm flex items-center gap-1.5", style.badge)}>
               <style.icon size={14}/> {style.label}
             </span>
-            <span className="text-xs text-gray-400">{rec.confidence}% confidence</span>
+            <span className="text-xs text-gray-400">{rec.confidence}% confidence in this call</span>
           </div>
+          {rec.win_probability != null && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-gray-600">Estimated Win Probability</span>
+                <span className={clsx("text-sm font-bold",
+                  rec.win_probability>=60?"text-green-600":rec.win_probability>=35?"text-amber-600":"text-red-600")}>
+                  {rec.win_probability}%
+                </span>
+              </div>
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div className={clsx("h-full rounded-full",
+                    rec.win_probability>=60?"bg-green-500":rec.win_probability>=35?"bg-amber-500":"bg-red-500")}
+                  style={{ width: `${rec.win_probability}%` }}/>
+              </div>
+            </div>
+          )}
           <p className="text-sm text-gray-700">{rec.reasoning}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -875,6 +1055,7 @@ function DetailModal({ oppId, onClose }) {
     { id:"team", label:"Team", icon: Users },
     { id:"feasibility", label:"Feasibility", icon: Microscope },
     { id:"costing", label:"Costing", icon: Calculator },
+    { id:"compliance", label:"Compliance", icon: ListChecks },
     { id:"questions", label:`Questions${opp?.questions_open>0?` (${opp.questions_open})`:opp?.questions_count>0?` (${opp.questions_count})`:""}`, icon: MessageSquare },
     { id:"approvals", label:"Approvals", icon: CheckCircle2 },
     { id:"ai", label:"AI Advisor", icon: Sparkles },
@@ -1039,6 +1220,7 @@ function DetailModal({ oppId, onClose }) {
 
               {activeTab === "feasibility" && <FeasibilityPanel oppId={oppId}/>}
               {activeTab === "costing" && <CostingPanel oppId={oppId}/>}
+              {activeTab === "compliance" && <CompliancePanel oppId={oppId}/>}
               {activeTab === "questions" && <QuestionsPanel oppId={oppId}/>}
 
               {/* ── Bond Requirement Notice ─────────────────────── */}

@@ -126,6 +126,11 @@ export const oppsV2Api = {
   addCostingLine:           (id, d) => api.post(`/opportunities-v2/${id}/costing/lines`, d),
   updateCostingLine:        (id, lineId, d) => api.patch(`/opportunities-v2/${id}/costing/lines/${lineId}`, d),
   deleteCostingLine:        (id, lineId) => api.delete(`/opportunities-v2/${id}/costing/lines/${lineId}`),
+  getRequirements:          id => api.get(`/opportunities-v2/${id}/requirements`),
+  extractRequirements:      (id, rfp_text) => api.post(`/opportunities-v2/${id}/requirements/extract`, { rfp_text }),
+  addRequirement:           (id, d) => api.post(`/opportunities-v2/${id}/requirements`, d),
+  updateRequirement:        (id, reqId, d) => api.patch(`/opportunities-v2/${id}/requirements/${reqId}`, d),
+  deleteRequirement:        (id, reqId) => api.delete(`/opportunities-v2/${id}/requirements/${reqId}`),
 }
 
 // ── VENDORS ───────────────────────────────────────────────────────────────────
@@ -338,6 +343,15 @@ export const bondsApi = {
 export const aiAlertsApi = {
   list: p => api.get("/scheduler/ai-alerts", { params: p }),
   scan: () => api.post("/scheduler/scan-ai-alerts"),
+}
+
+// ── CONTENT LIBRARY (RAG answer drafting) ───────────────────────────────────────
+export const contentLibraryApi = {
+  list:        p => api.get("/content-library", { params: p }),
+  create:      d => api.post("/content-library", d),
+  update:      (id, d) => api.patch(`/content-library/${id}`, d),
+  delete:      id => api.delete(`/content-library/${id}`),
+  draftAnswer: question => api.post("/content-library/draft-answer", { question }),
 }
 
 // ── SERVICE CATEGORIES ────────────────────────────────────────────────────────

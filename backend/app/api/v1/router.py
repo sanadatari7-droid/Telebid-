@@ -11,7 +11,8 @@ from app.api.v1.endpoints import (
     users, reports, evaluations, contracts,
     watchlist, scheduler, comments,
     settings, ict, expro, bid_logs,
-    search, location, excel_import
+    search, location, excel_import,
+    content_library
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -42,3 +43,4 @@ api_router.include_router(bid_logs.router)
 api_router.include_router(search.router)
 api_router.include_router(location.router)
 api_router.include_router(excel_import.router)
+api_router.include_router(content_library.router)

@@ -143,6 +143,13 @@ class QuestionCreate(BaseModel):
     deadline_dt: Optional[datetime] = None
     priority: str = "NORMAL"
 
+class RequirementExtract(BaseModel):
+    rfp_text: str
+
+class RequirementCreate(BaseModel):
+    requirement_text: str
+    category: str = "Other"
+
 class QuestionAnswer(BaseModel):
     response: str
 
@@ -674,14 +681,106 @@ async def generate_ai_recommendation(opp_id: int, conn=Depends(get_db), current_
 
     from app.core.config import settings
     row = await fetch_one(conn, """
-        INSERT INTO opp_ai_insights (opp_id, recommendation, confidence, key_strengths, key_risks, reasoning, model_used, generated_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *""",
-        opp_id, result["recommendation"], result["confidence"],
+        INSERT INTO opp_ai_insights (opp_id, recommendation, confidence, win_probability, key_strengths, key_risks, reasoning, model_used, generated_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *""",
+        opp_id, result["recommendation"], result["confidence"], result["win_probability"],
         json.dumps(result["key_strengths"]), json.dumps(result["key_risks"]),
         result["reasoning"], settings.ANTHROPIC_MODEL, current_user.user_id)
     await _log(conn, opp_id, "AI_RECOMMENDATION_GENERATED", current_user.user_id,
         comments=f"{result['recommendation']} ({result['confidence']}% confidence)")
     return {"available": True, "latest": row}
+
+# ── RFP Compliance Matrix ────────────────────────────────────────────────────
+
+@router.get("/{opp_id}/requirements")
+async def list_requirements(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    from app.services import requirement_extractor
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    rows = await fetch_all(conn,
+        "SELECT * FROM opportunity_requirements WHERE opp_id=$1 AND company_id=$2 ORDER BY sort_order, requirement_id",
+        opp_id, company_id)
+    counts = {"NOT_STARTED": 0, "IN_PROGRESS": 0, "MET": 0, "NOT_MET": 0, "WAIVED": 0}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    return {"items": rows, "summary": counts, "extraction_available": requirement_extractor.is_configured()}
+
+@router.post("/{opp_id}/requirements/extract", status_code=201)
+async def extract_requirements(opp_id: int, body: RequirementExtract, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """Paste RFP text; AI extracts a requirement per row and appends them to the matrix
+    (existing rows are left untouched, so this can be run again on more text)."""
+    from app.services import requirement_extractor
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    if not requirement_extractor.is_configured():
+        raise HTTPException(status_code=503,
+            detail="Requirement extraction is not configured on this server. Set ANTHROPIC_API_KEY in the backend environment to enable it.")
+    if not body.rfp_text or not body.rfp_text.strip():
+        raise HTTPException(status_code=400, detail="rfp_text is required")
+
+    try:
+        extracted = await requirement_extractor.extract(body.rfp_text)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Requirement extraction failed: {e}")
+    if not extracted:
+        return {"message": "No requirements found in the given text", "added": 0, "items": []}
+
+    start_order = await fetch_val(conn,
+        "SELECT COALESCE(MAX(sort_order),0) FROM opportunity_requirements WHERE opp_id=$1 AND company_id=$2",
+        opp_id, company_id) or 0
+    inserted = []
+    for i, r in enumerate(extracted):
+        row = await fetch_one(conn, """
+            INSERT INTO opportunity_requirements (opp_id, company_id, category, requirement_text, source, sort_order, created_by)
+            VALUES ($1,$2,$3,$4,'AI',$5,$6) RETURNING *""",
+            opp_id, company_id, r.get("category") or "Other", r["requirement_text"],
+            start_order + i + 1, current_user.user_id)
+        inserted.append(row)
+    await _log(conn, opp_id, "REQUIREMENTS_EXTRACTED", current_user.user_id,
+        comments=f"AI extracted {len(inserted)} requirement(s) from pasted RFP text")
+    return {"message": f"Extracted {len(inserted)} requirement(s)", "added": len(inserted), "items": inserted}
+
+@router.post("/{opp_id}/requirements", status_code=201)
+async def add_requirement(opp_id: int, body: RequirementCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    next_order = await fetch_val(conn,
+        "SELECT COALESCE(MAX(sort_order),0)+1 FROM opportunity_requirements WHERE opp_id=$1 AND company_id=$2",
+        opp_id, company_id)
+    row = await fetch_one(conn, """
+        INSERT INTO opportunity_requirements (opp_id, company_id, category, requirement_text, source, sort_order, created_by)
+        VALUES ($1,$2,$3,$4,'MANUAL',$5,$6) RETURNING *""",
+        opp_id, company_id, body.category, body.requirement_text, next_order, current_user.user_id)
+    return row
+
+@router.patch("/{opp_id}/requirements/{requirement_id}")
+async def update_requirement(opp_id: int, requirement_id: int, body: dict, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    allowed = ["category", "requirement_text", "status", "response", "sort_order"]
+    valid_statuses = {"NOT_STARTED", "IN_PROGRESS", "MET", "NOT_MET", "WAIVED"}
+    if "status" in body and body["status"] not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(valid_statuses)}")
+    updates = ["updated_at=NOW()"]
+    args = []
+    for k, v in body.items():
+        if k in allowed:
+            args.append(v); updates.append(f"{k}=${len(args)}")
+    if not args:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    args.append(requirement_id); args.append(company_id)
+    result = await execute(conn,
+        f"UPDATE opportunity_requirements SET {','.join(updates)} WHERE requirement_id=${len(args)-1} AND company_id=${len(args)}", *args)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Requirement not found")
+    return {"message": "Requirement updated"}
+
+@router.delete("/{opp_id}/requirements/{requirement_id}")
+async def delete_requirement(opp_id: int, requirement_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    result = await execute(conn, "DELETE FROM opportunity_requirements WHERE requirement_id=$1 AND company_id=$2", requirement_id, company_id)
+    if result == "DELETE 0": raise HTTPException(status_code=404, detail="Requirement not found")
+    return {"message": "Requirement deleted"}
 
 # ── Team Members ──────────────────────────────────────────────────────────────
 

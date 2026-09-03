@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 class BidAdvisorResult(BaseModel):
     recommendation: str = Field(description="One of: BID, NO_BID, CONDITIONAL_BID")
-    confidence: int = Field(description="0-100 confidence in this recommendation")
+    confidence: int = Field(description="0-100 confidence in this recommendation call itself")
+    win_probability: int = Field(description="0-100 estimated probability of winning this specific opportunity IF it is bid, independent of whether you recommend bidding it")
     key_strengths: List[str] = Field(description="Up to 5 short bullet points favoring a bid")
     key_risks: List[str] = Field(description="Up to 5 short bullet points against a bid, or conditions to satisfy")
     reasoning: str = Field(description="2-4 sentence explanation grounded in the data given")
@@ -42,6 +43,13 @@ def _build_prompt(opp: dict, history: dict) -> str:
         "Base your recommendation ONLY on the data below — do not invent facts about",
         "the customer, competitors, or market that aren't given here. If information",
         "needed for a confident call is missing, say so as a risk rather than guessing.",
+        "",
+        "Separately from your recommendation, also estimate win_probability: the chance",
+        "of actually winning THIS opportunity if the company does bid it, grounded mainly",
+        "in the historical win rates given below (with this customer and in this service",
+        "line) and any risk factors in the opportunity data itself. This is independent of",
+        "the recommendation — e.g. a well-qualified opportunity can still recommend BID",
+        "with a modest win_probability if the historical win rate here is low.",
         "",
         "## Opportunity",
         f"- Customer: {opp.get('customer_name')} "
