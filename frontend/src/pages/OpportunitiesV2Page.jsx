@@ -12,7 +12,7 @@ import {
   Download, Eye, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw,
   Users, MessageSquare, Settings2, Microscope, UserCheck, X, Send,
   Check, MoreHorizontal, Trash2, Reply, Lock, Calendar, User, Building2, Bell,
-  Sparkles, ThumbsUp, ThumbsDown, HelpCircle
+  Sparkles, ThumbsUp, ThumbsDown, HelpCircle, Calculator
 } from "lucide-react"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -442,6 +442,166 @@ function FeasibilityPanel({ oppId }) {
   )
 }
 
+// ── Costing Sheet ─────────────────────────────────────────────────────────────
+const EMPTY_LINE = { service_name:"", bandwidth_mbps:"", qty:1, duration_months:"", price_list_mrc:"", price_list_nrc:"", expro_mrc:"", expro_nrc:"", discount_mrc_pct:0, discount_nrc_pct:0 }
+
+function money(n) { return `$${Number(n||0).toLocaleString()}` }
+
+function CostingPanel({ oppId }) {
+  const qc = useQueryClient()
+  const [newLine, setNewLine] = useState(EMPTY_LINE)
+  const { data, isLoading } = useQuery({
+    queryKey: ["opp-costing", oppId],
+    queryFn: () => oppsV2Api.getCosting(oppId).then(r => r.data),
+  })
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["opp-costing", oppId] })
+
+  const headerMut = useMutation({
+    mutationFn: patch => oppsV2Api.updateCosting(oppId, patch),
+    onSuccess: invalidate,
+    onError: e => toast.error(apiErrorMessage(e, "Failed to update costing sheet")),
+  })
+  const addMut = useMutation({
+    mutationFn: () => oppsV2Api.addCostingLine(oppId, {
+      ...newLine,
+      bandwidth_mbps: newLine.bandwidth_mbps ? Number(newLine.bandwidth_mbps) : null,
+      qty: Number(newLine.qty) || 1,
+      duration_months: newLine.duration_months ? Number(newLine.duration_months) : null,
+      price_list_mrc: Number(newLine.price_list_mrc) || 0,
+      price_list_nrc: Number(newLine.price_list_nrc) || 0,
+      expro_mrc: newLine.expro_mrc ? Number(newLine.expro_mrc) : null,
+      expro_nrc: newLine.expro_nrc ? Number(newLine.expro_nrc) : null,
+      discount_mrc_pct: Number(newLine.discount_mrc_pct) || 0,
+      discount_nrc_pct: Number(newLine.discount_nrc_pct) || 0,
+    }),
+    onSuccess: () => { toast.success("Line added"); setNewLine(EMPTY_LINE); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to add line")),
+  })
+  const updateLineMut = useMutation({
+    mutationFn: ({ lineId, patch }) => oppsV2Api.updateCostingLine(oppId, lineId, patch),
+    onSuccess: invalidate,
+    onError: e => toast.error(apiErrorMessage(e, "Failed to update line")),
+  })
+  const deleteLineMut = useMutation({
+    mutationFn: lineId => oppsV2Api.deleteCostingLine(oppId, lineId),
+    onSuccess: () => { toast.success("Line removed"); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to remove line")),
+  })
+
+  if (isLoading) return <div className="skeleton h-48"/>
+  const { sheet, lines = [], summary = {} } = data || {}
+
+  const numField = (val, onCommit, opts = {}) => (
+    <input type="number" defaultValue={val ?? ""} step={opts.step || "any"}
+      className="input !py-1 !px-2 text-sm text-right w-full"
+      onBlur={e => { const v = e.target.value; if (v !== String(val ?? "")) onCommit(v === "" ? null : Number(v)) }}/>
+  )
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="card-sm">
+        <div className="section-title flex items-center gap-2"><Calculator size={13}/> Telecom Costing Sheet</div>
+        <div className="grid grid-cols-3 gap-3 mt-2">
+          <div>
+            <label className="label">Order Number</label>
+            <div className="input bg-gray-50 text-gray-500">{sheet?.order_number || "—"}</div>
+          </div>
+          <div>
+            <label className="label">Duration (months)</label>
+            {numField(sheet?.duration_months, v => headerMut.mutate({ duration_months: v }))}
+          </div>
+          <div>
+            <label className="label">VAT %</label>
+            {numField(sheet?.vat_pct, v => headerMut.mutate({ vat_pct: v }))}
+          </div>
+        </div>
+      </div>
+
+      {/* Line items */}
+      <div className="card-sm overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-gray-400 text-left border-b">
+              <th className="py-1.5 pr-2">Service</th>
+              <th className="py-1.5 pr-2">BW (Mbps)</th>
+              <th className="py-1.5 pr-2">Qty</th>
+              <th className="py-1.5 pr-2">Duration</th>
+              <th className="py-1.5 pr-2 text-right">Price List MRC</th>
+              <th className="py-1.5 pr-2 text-right">Price List NRC</th>
+              <th className="py-1.5 pr-2 text-right">EXPRO MRC</th>
+              <th className="py-1.5 pr-2 text-right">EXPRO NRC</th>
+              <th className="py-1.5 pr-2 text-right">Disc% MRC</th>
+              <th className="py-1.5 pr-2 text-right">Disc% NRC</th>
+              <th className="py-1.5 pr-2 text-right">Selling MRC</th>
+              <th className="py-1.5 pr-2 text-right">Selling NRC</th>
+              <th className="py-1.5 pr-2 text-right">Total MRC</th>
+              <th className="py-1.5 pr-2 text-right">Total NRC</th>
+              <th className="py-1.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map(l => (
+              <tr key={l.line_id} className="border-b last:border-0">
+                <td className="py-1 pr-2 font-medium">{l.service_name}</td>
+                <td className="py-1 pr-2">{numField(l.bandwidth_mbps, v => updateLineMut.mutate({ lineId: l.line_id, patch: { bandwidth_mbps: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.qty, v => updateLineMut.mutate({ lineId: l.line_id, patch: { qty: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.duration_months, v => updateLineMut.mutate({ lineId: l.line_id, patch: { duration_months: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.price_list_mrc, v => updateLineMut.mutate({ lineId: l.line_id, patch: { price_list_mrc: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.price_list_nrc, v => updateLineMut.mutate({ lineId: l.line_id, patch: { price_list_nrc: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.expro_mrc, v => updateLineMut.mutate({ lineId: l.line_id, patch: { expro_mrc: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.expro_nrc, v => updateLineMut.mutate({ lineId: l.line_id, patch: { expro_nrc: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.discount_mrc_pct, v => updateLineMut.mutate({ lineId: l.line_id, patch: { discount_mrc_pct: v } }))}</td>
+                <td className="py-1 pr-2">{numField(l.discount_nrc_pct, v => updateLineMut.mutate({ lineId: l.line_id, patch: { discount_nrc_pct: v } }))}</td>
+                <td className="py-1 pr-2 text-right whitespace-nowrap">{money(l.selling_price_mrc)}</td>
+                <td className="py-1 pr-2 text-right whitespace-nowrap">{money(l.selling_price_nrc)}</td>
+                <td className="py-1 pr-2 text-right whitespace-nowrap font-medium">{money(l.total_mrc)}</td>
+                <td className="py-1 pr-2 text-right whitespace-nowrap font-medium">{money(l.total_nrc)}</td>
+                <td className="py-1">
+                  <button className="text-gray-300 hover:text-red-500" onClick={() => deleteLineMut.mutate(l.line_id)}>
+                    <Trash2 size={13}/>
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            {/* Add-line row */}
+            <tr>
+              <td className="py-1 pr-2"><input className="input !py-1 !px-2 text-sm" placeholder="Service name" value={newLine.service_name} onChange={e=>setNewLine(p=>({...p,service_name:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.bandwidth_mbps} onChange={e=>setNewLine(p=>({...p,bandwidth_mbps:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.qty} onChange={e=>setNewLine(p=>({...p,qty:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.duration_months} onChange={e=>setNewLine(p=>({...p,duration_months:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.price_list_mrc} onChange={e=>setNewLine(p=>({...p,price_list_mrc:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.price_list_nrc} onChange={e=>setNewLine(p=>({...p,price_list_nrc:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.expro_mrc} onChange={e=>setNewLine(p=>({...p,expro_mrc:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.expro_nrc} onChange={e=>setNewLine(p=>({...p,expro_nrc:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" step="0.01" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.discount_mrc_pct} onChange={e=>setNewLine(p=>({...p,discount_mrc_pct:e.target.value}))}/></td>
+              <td className="py-1 pr-2"><input type="number" step="0.01" className="input !py-1 !px-2 text-sm text-right w-full" value={newLine.discount_nrc_pct} onChange={e=>setNewLine(p=>({...p,discount_nrc_pct:e.target.value}))}/></td>
+              <td colSpan={3}></td>
+              <td className="py-1">
+                <button className="btn-primary btn-sm !py-1 !px-2" disabled={!newLine.service_name || addMut.isPending} onClick={()=>addMut.mutate()}>
+                  <Plus size={13}/>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Summary */}
+      <div className="card-sm">
+        <div className="grid grid-cols-2 gap-y-1.5 max-w-xs ml-auto text-sm">
+          <span className="text-gray-400">Total MRC</span><span className="text-right font-medium">{money(summary.subtotal_mrc)}</span>
+          <span className="text-gray-400">Total NRC</span><span className="text-right font-medium">{money(summary.subtotal_nrc)}</span>
+          <span className="text-gray-400">Total for {sheet?.duration_months || 0} months</span><span className="text-right font-medium">{money(summary.total_for_duration)}</span>
+          <span className="text-gray-400">VAT {sheet?.vat_pct || 0}%</span><span className="text-right font-medium">{money(summary.vat_amount)}</span>
+          <span className="font-semibold text-gray-900 border-t pt-1.5">Grand Total</span><span className="text-right font-bold text-gray-900 border-t pt-1.5">{money(summary.grand_total)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── AI Bid/No-Bid Advisor ────────────────────────────────────────────────────
 const AI_REC_STYLE = {
   BID:             { icon: ThumbsUp,   badge: "badge-green", label: "BID" },
@@ -714,6 +874,7 @@ function DetailModal({ oppId, onClose }) {
     { id:"overview", label:"Overview", icon: FileText },
     { id:"team", label:"Team", icon: Users },
     { id:"feasibility", label:"Feasibility", icon: Microscope },
+    { id:"costing", label:"Costing", icon: Calculator },
     { id:"questions", label:`Questions${opp?.questions_open>0?` (${opp.questions_open})`:opp?.questions_count>0?` (${opp.questions_count})`:""}`, icon: MessageSquare },
     { id:"approvals", label:"Approvals", icon: CheckCircle2 },
     { id:"ai", label:"AI Advisor", icon: Sparkles },
@@ -877,6 +1038,7 @@ function DetailModal({ oppId, onClose }) {
               )}
 
               {activeTab === "feasibility" && <FeasibilityPanel oppId={oppId}/>}
+              {activeTab === "costing" && <CostingPanel oppId={oppId}/>}
               {activeTab === "questions" && <QuestionsPanel oppId={oppId}/>}
 
               {/* ── Bond Requirement Notice ─────────────────────── */}

@@ -121,6 +121,11 @@ export const oppsV2Api = {
   triggerBondReminder:      id => api.post(`/opportunities-v2/${id}/trigger-bond-reminder`),
   getAiRecommendation:      id => api.get(`/opportunities-v2/${id}/ai-recommendation`),
   generateAiRecommendation: id => api.post(`/opportunities-v2/${id}/ai-recommendation`),
+  getCosting:               id => api.get(`/opportunities-v2/${id}/costing`),
+  updateCosting:            (id, d) => api.patch(`/opportunities-v2/${id}/costing`, d),
+  addCostingLine:           (id, d) => api.post(`/opportunities-v2/${id}/costing/lines`, d),
+  updateCostingLine:        (id, lineId, d) => api.patch(`/opportunities-v2/${id}/costing/lines/${lineId}`, d),
+  deleteCostingLine:        (id, lineId) => api.delete(`/opportunities-v2/${id}/costing/lines/${lineId}`),
 }
 
 // ── VENDORS ───────────────────────────────────────────────────────────────────

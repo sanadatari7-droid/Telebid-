@@ -1554,3 +1554,43 @@ CREATE INDEX IF NOT EXISTS idx_contracts_company_id ON contracts(company_id);
 CREATE INDEX IF NOT EXISTS idx_employees_company_id ON employees(company_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_company_id ON notifications(company_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_company_id ON audit_logs(company_id);
+
+-- ── Telecom Costing Sheet ────────────────────────────────────────────────
+-- One costing sheet per opportunities_v2 opportunity (1:1 — enforced via
+-- UNIQUE on opp_id), carrying the same order_number as its parent
+-- opportunity (copied from opportunities_v2.opp_number when the sheet is
+-- lazily created on first access). Selling price / totals / VAT / grand
+-- total are computed at read time in the API, never stored here.
+CREATE TABLE IF NOT EXISTS opportunity_costing_sheets (
+    costing_id      SERIAL PRIMARY KEY,
+    opp_id          INT NOT NULL UNIQUE REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    company_id      INT NOT NULL REFERENCES companies(company_id),
+    order_number    VARCHAR(30) NOT NULL,
+    duration_months INT NOT NULL DEFAULT 12,
+    vat_pct         NUMERIC(5,2) NOT NULL DEFAULT 15.00,
+    notes           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    created_by      INT REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_costing_lines (
+    line_id          SERIAL PRIMARY KEY,
+    costing_id       INT NOT NULL REFERENCES opportunity_costing_sheets(costing_id) ON DELETE CASCADE,
+    company_id       INT NOT NULL REFERENCES companies(company_id),
+    sort_order       INT NOT NULL DEFAULT 0,
+    service_name     VARCHAR(150) NOT NULL,
+    bandwidth_mbps   NUMERIC(10,2),
+    qty              INT NOT NULL DEFAULT 1,
+    duration_months  INT,
+    price_list_mrc   NUMERIC(12,2) NOT NULL DEFAULT 0,
+    price_list_nrc   NUMERIC(12,2) NOT NULL DEFAULT 0,
+    expro_mrc        NUMERIC(12,2),
+    expro_nrc        NUMERIC(12,2),
+    discount_mrc_pct NUMERIC(5,4) NOT NULL DEFAULT 0,
+    discount_nrc_pct NUMERIC(5,4) NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_costing_lines_costing_id ON opportunity_costing_lines(costing_id);
+CREATE INDEX IF NOT EXISTS idx_costing_sheets_company_id ON opportunity_costing_sheets(company_id);

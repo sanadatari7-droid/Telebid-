@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List
 from datetime import datetime, date
 import json
+import math
 from pydantic import BaseModel, validator
 from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
@@ -119,6 +120,23 @@ class FeasibilityUpdate(BaseModel):
     feasibility_status: Optional[str] = None
     feasibility_notes: Optional[str] = None
 
+class CostingSheetUpdate(BaseModel):
+    duration_months: Optional[int] = None
+    vat_pct: Optional[float] = None
+    notes: Optional[str] = None
+
+class CostingLineCreate(BaseModel):
+    service_name: str
+    bandwidth_mbps: Optional[float] = None
+    qty: int = 1
+    duration_months: Optional[int] = None
+    price_list_mrc: float = 0
+    price_list_nrc: float = 0
+    expro_mrc: Optional[float] = None
+    expro_nrc: Optional[float] = None
+    discount_mrc_pct: float = 0  # fraction 0-1, e.g. 0.85
+    discount_nrc_pct: float = 0
+
 class QuestionCreate(BaseModel):
     question_text: str
     assigned_to: Optional[int] = None
@@ -197,6 +215,53 @@ async def _build_customer_ref(conn, opp_id: int, company_id: int, presales_initi
     if cfg.get("use_version") and cfg.get("version_label"):
         parts.append(cfg["version_label"])
     return sep.join(parts) if parts else (customer_id or "")
+
+async def _get_or_create_costing_sheet(conn, opp_id: int, company_id: int) -> dict:
+    sheet = await fetch_one(conn, "SELECT * FROM opportunity_costing_sheets WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    if sheet:
+        return dict(sheet)
+    opp_number = await fetch_val(conn, "SELECT opp_number FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    await execute(conn,
+        "INSERT INTO opportunity_costing_sheets (opp_id, company_id, order_number) VALUES ($1,$2,$3)",
+        opp_id, company_id, opp_number)
+    sheet = await fetch_one(conn, "SELECT * FROM opportunity_costing_sheets WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+    return dict(sheet)
+
+def _costing_line_computed(line: dict) -> dict:
+    """Selling price / line totals — same formula chain as the source Excel
+    template: Selling = ROUNDUP(PriceList*(1-Disc%),0), Total = Selling*Qty.
+    math.ceil matches Excel's ROUNDUP(x,0) for non-negative money values."""
+    price_mrc = float(line["price_list_mrc"] or 0)
+    price_nrc = float(line["price_list_nrc"] or 0)
+    disc_mrc = float(line["discount_mrc_pct"] or 0)
+    disc_nrc = float(line["discount_nrc_pct"] or 0)
+    qty = int(line["qty"] or 0)
+    selling_mrc = math.ceil(price_mrc * (1 - disc_mrc))
+    selling_nrc = math.ceil(price_nrc * (1 - disc_nrc))
+    out = dict(line)
+    out["selling_price_mrc"] = selling_mrc
+    out["selling_price_nrc"] = selling_nrc
+    out["total_mrc"] = selling_mrc * qty
+    out["total_nrc"] = selling_nrc * qty
+    return out
+
+def _costing_summary(lines: list, sheet: dict) -> dict:
+    """Sheet-level totals — same chain as the template's rows 8-11:
+    Total = SUM(lines), Total for N months = Total_MRC*duration + Total_NRC,
+    VAT = that * vat_pct/100, Grand Total = that + VAT."""
+    subtotal_mrc = sum(l["total_mrc"] for l in lines)
+    subtotal_nrc = sum(l["total_nrc"] for l in lines)
+    duration = int(sheet["duration_months"] or 0)
+    vat_pct = float(sheet["vat_pct"] or 0)
+    total_for_duration = (subtotal_mrc * duration) + subtotal_nrc
+    vat_amount = round(total_for_duration * vat_pct / 100, 2)
+    return {
+        "subtotal_mrc": subtotal_mrc,
+        "subtotal_nrc": subtotal_nrc,
+        "total_for_duration": total_for_duration,
+        "vat_amount": vat_amount,
+        "grand_total": round(total_for_duration + vat_amount, 2),
+    }
 
 async def _update_questions_count(conn, opp_id: int):
     total = await fetch_val(conn, "SELECT COUNT(*) FROM opportunity_questions WHERE opp_id=$1", opp_id) or 0
@@ -693,6 +758,83 @@ async def upsert_feasibility(opp_id: int, body: FeasibilityUpdate, conn=Depends(
         body.feasibility_status or "PENDING", body.feasibility_notes)
     await _log(conn, opp_id, "FEASIBILITY_UPDATED", current_user.user_id)
     return {"message": "Feasibility updated"}
+
+# ── Costing Sheet ─────────────────────────────────────────────────────────────
+# One sheet per opportunity (1:1), carrying the same order_number as its
+# parent opportunity's opp_number. Selling price / totals / VAT / grand total
+# are computed at read time (_costing_line_computed / _costing_summary),
+# never stored — the app-level equivalent of the source Excel template's
+# live formulas rather than hardcoded results.
+
+@router.get("/{opp_id}/costing")
+async def get_costing(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    sheet = await _get_or_create_costing_sheet(conn, opp_id, company_id)
+    raw_lines = await fetch_all(conn,
+        "SELECT * FROM opportunity_costing_lines WHERE costing_id=$1 ORDER BY sort_order, line_id",
+        sheet["costing_id"])
+    lines = [_costing_line_computed(dict(l)) for l in raw_lines]
+    return {"sheet": sheet, "lines": lines, "summary": _costing_summary(lines, sheet)}
+
+@router.patch("/{opp_id}/costing")
+async def update_costing(opp_id: int, body: CostingSheetUpdate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    sheet = await _get_or_create_costing_sheet(conn, opp_id, company_id)
+    allowed = ["duration_months", "vat_pct", "notes"]
+    updates = ["updated_at=NOW()"]
+    args = []
+    for k, v in body.dict(exclude_none=True).items():
+        if k in allowed:
+            args.append(v); updates.append(f"{k}=${len(args)}")
+    if not args:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    args.append(sheet["costing_id"])
+    await execute(conn, f"UPDATE opportunity_costing_sheets SET {','.join(updates)} WHERE costing_id=${len(args)}", *args)
+    return {"message": "Costing sheet updated"}
+
+@router.post("/{opp_id}/costing/lines", status_code=201)
+async def add_costing_line(opp_id: int, body: CostingLineCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    sheet = await _get_or_create_costing_sheet(conn, opp_id, company_id)
+    next_order = await fetch_val(conn, "SELECT COALESCE(MAX(sort_order),0)+1 FROM opportunity_costing_lines WHERE costing_id=$1", sheet["costing_id"])
+    await execute(conn, """
+        INSERT INTO opportunity_costing_lines
+            (costing_id, company_id, sort_order, service_name, bandwidth_mbps, qty, duration_months,
+             price_list_mrc, price_list_nrc, expro_mrc, expro_nrc, discount_mrc_pct, discount_nrc_pct)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+        sheet["costing_id"], company_id, next_order, body.service_name, body.bandwidth_mbps, body.qty, body.duration_months,
+        body.price_list_mrc, body.price_list_nrc, body.expro_mrc, body.expro_nrc, body.discount_mrc_pct, body.discount_nrc_pct)
+    return {"message": "Line added"}
+
+@router.patch("/{opp_id}/costing/lines/{line_id}")
+async def update_costing_line(opp_id: int, line_id: int, body: dict, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    allowed = ["service_name", "bandwidth_mbps", "qty", "duration_months", "price_list_mrc", "price_list_nrc",
+               "expro_mrc", "expro_nrc", "discount_mrc_pct", "discount_nrc_pct", "sort_order"]
+    updates = ["updated_at=NOW()"]
+    args = []
+    for k, v in body.items():
+        if k in allowed:
+            args.append(v); updates.append(f"{k}=${len(args)}")
+    if not args:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    args.append(line_id); args.append(company_id)
+    result = await execute(conn,
+        f"UPDATE opportunity_costing_lines SET {','.join(updates)} WHERE line_id=${len(args)-1} AND company_id=${len(args)}", *args)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Costing line not found")
+    return {"message": "Line updated"}
+
+@router.delete("/{opp_id}/costing/lines/{line_id}")
+async def delete_costing_line(opp_id: int, line_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    result = await execute(conn, "DELETE FROM opportunity_costing_lines WHERE line_id=$1 AND company_id=$2", line_id, company_id)
+    if result == "DELETE 0": raise HTTPException(status_code=404, detail="Costing line not found")
+    return {"message": "Line deleted"}
 
 # ── Questions ─────────────────────────────────────────────────────────────────
 
