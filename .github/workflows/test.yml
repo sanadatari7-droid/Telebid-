@@ -1,0 +1,55 @@
+name: Backend tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "database/schema.sql"
+      - ".github/workflows/test.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "database/schema.sql"
+      - ".github/workflows/test.yml"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: telebid
+          POSTGRES_USER: telebid
+          POSTGRES_PASSWORD: telebid123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telebid"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      # The suite builds its own throwaway "telebid_test" database against
+      # this service container (see tests/conftest.py) — it never touches
+      # the "telebid" database the container also creates.
+      - name: Run pytest
+        working-directory: backend
+        run: pytest -v
