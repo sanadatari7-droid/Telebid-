@@ -33,6 +33,14 @@ services:
       MAX_FAILED_LOGINS: "5"
       BCRYPT_ROUNDS: "12"
       FRONTEND_URL: http://localhost:5173
+      # Optional: enables the AI Bid/No-Bid Advisor, AI Alert Watchdog, RFP
+      # requirement extraction, and content-library answer drafting. Leave
+      # unset (the default) and those features degrade to a clear "not
+      # configured" response instead of failing. Set via a root-level .env
+      # file (see .env.example) — never hardcode a real key here, since this
+      # file is committed to git.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
     ports:
       - "8000:8000"
     volumes:
