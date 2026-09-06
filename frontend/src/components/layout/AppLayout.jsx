@@ -8,7 +8,7 @@ import {
   Users, Bell, LogOut, Search, ChevronDown, BookOpen, Shield,
   Calendar, Eye, History, Globe, Building2, Radio, Antenna,
   Monitor, FileSpreadsheet, Briefcase, Layers, MapPin, X,
-  ChevronRight, TrendingUp, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark, Sparkles, BookOpen as LibraryIcon
+  ChevronRight, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark, Sparkles, BookOpen as LibraryIcon
 } from "lucide-react"
 import clsx from "clsx"
 
@@ -20,20 +20,27 @@ const NAV_SECTIONS = [
     ]
   },
   {
-    section: "Bid Management",
+    // The core deal pipeline — everything from a new tender landing to a
+    // signed bid bond. "Opportunities" (the pre-rebuild kanban tool) is
+    // deliberately not listed here anymore: RFP & Bids is its full
+    // replacement, and having both confused first-time users into not
+    // knowing which one to use. The route itself still exists, unlinked.
+    section: "Pipeline",
     items: [
-      { label: "Lost Records",       path: "/lost-records", icon: XCircle },
-      { label: "Audit Log",           path: "/audit-log",    icon: Shield },
-      { label: "RFP & Bids",         path: "/rfp-bids",    icon: Briefcase },
+      { label: "RFP & Bids",         path: "/rfp-bids",     icon: Briefcase },
       { label: "All Bids",            path: "/bids",         icon: FileText },
       { label: "EXPRO / Gov",         path: "/expro",        icon: Antenna },
       { label: "ICT Projects",        path: "/ict",          icon: Monitor },
       { label: "Bonds",               path: "/bonds",        icon: Landmark },
       { label: "Won Records",        path: "/won-records",  icon: Trophy },
+      { label: "Lost Records",       path: "/lost-records", icon: XCircle },
+    ]
+  },
+  {
+    section: "AI Tools",
+    items: [
       { label: "AI Alerts",           path: "/ai-alerts",    icon: Sparkles },
       { label: "Content Library",     path: "/content-library", icon: LibraryIcon },
-      { label: "Opportunities",       path: "/opportunities",icon: TrendingUp },
-      { label: "Invitations",         path: "/invitations",  icon: Bell },
     ]
   },
   {
@@ -52,19 +59,21 @@ const NAV_SECTIONS = [
     ]
   },
   {
-    section: "Analytics",
+    section: "Reports",
     items: [
       { label: "Reports",     path: "/reports",    icon: BarChart3 },
       { label: "Bid Logs",    path: "/bid-logs",   icon: History },
+      { label: "Audit Log",   path: "/audit-log",  icon: Shield },
     ]
   },
   {
-    section: "System",
+    section: "Admin",
     items: [
       { label: "Company Settings",path: "/company-settings",icon: Building2 },
       { label: "System Settings", path: "/system-settings", icon: Settings },
       { label: "Users",           path: "/users",            icon: Users },
       { label: "Employees",       path: "/employees",        icon: Users },
+      { label: "Invitations",     path: "/invitations",      icon: Bell },
     ]
   },
 ]
