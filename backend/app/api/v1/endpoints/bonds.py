@@ -18,6 +18,17 @@ class BondCreate(BaseModel):
     issuer_bank: Optional[str] = None
     beneficiary: Optional[str] = None
     notes: Optional[str] = None
+    # Fields matching the company's own Bid Bond Request form (a formal L/G
+    # request sent To/From named people before the bank issues the bond).
+    bid_ref: Optional[str] = None              # company's own RFP reference, e.g. "SLM-RF: MAU-26-166-CP"
+    bid_subject: Optional[str] = None
+    beneficiary_address: Optional[str] = None
+    lg_percentage: Optional[float] = None      # e.g. 1.0 for "One Percent (1%)"
+    lg_base_value: Optional[float] = None      # the SR amount the percentage is taken of
+    language: Optional[str] = "Arabic"
+    submission_date: Optional[date] = None
+    requester_name: Optional[str] = None       # "From"
+    recipient_name: Optional[str] = None       # "To"
 
 class BondUpdate(BaseModel):
     bond_number: Optional[str] = None
@@ -28,6 +39,18 @@ class BondUpdate(BaseModel):
     beneficiary: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    bid_ref: Optional[str] = None
+    bid_subject: Optional[str] = None
+    beneficiary_address: Optional[str] = None
+    lg_percentage: Optional[float] = None
+    lg_base_value: Optional[float] = None
+    language: Optional[str] = None
+    submission_date: Optional[date] = None
+    requester_name: Optional[str] = None
+    recipient_name: Optional[str] = None
+
+class ApprovalRecord(BaseModel):
+    approver_name: str
 
 @router.get("")
 async def list_bonds(
@@ -61,13 +84,27 @@ async def create_bond(body: BondCreate, conn=Depends(get_db), current_user=Depen
     company_id = require_company(current_user)
     opp_ok = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", body.opp_id, company_id)
     if not opp_ok: raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    # bond_amount is the source of truth for reporting/KPIs — when the L/G
+    # percentage + base value are given (the form's actual "1% of SR X"
+    # phrasing) and no explicit amount was typed, derive it so it can never
+    # drift from the percentage the request document itself specifies.
+    bond_amount = body.bond_amount
+    if bond_amount is None and body.lg_percentage is not None and body.lg_base_value is not None:
+        bond_amount = round(body.lg_base_value * body.lg_percentage / 100, 2)
+
     await execute(conn, """
         INSERT INTO opportunity_bonds (opp_id, bond_type, bond_number, bond_amount, currency_id,
-            issue_date, expiry_date, issuer_bank, beneficiary, notes, created_by, company_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
-        body.opp_id, body.bond_type, body.bond_number, body.bond_amount, body.currency_id,
+            issue_date, expiry_date, issuer_bank, beneficiary, notes, created_by, company_id,
+            bid_ref, bid_subject, beneficiary_address, lg_percentage, lg_base_value, language,
+            submission_date, requester_name, recipient_name)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)""",
+        body.opp_id, body.bond_type, body.bond_number, bond_amount, body.currency_id,
         body.issue_date, body.expiry_date, body.issuer_bank, body.beneficiary,
-        body.notes, current_user.user_id, company_id)
+        body.notes, current_user.user_id, company_id,
+        body.bid_ref, body.bid_subject, body.beneficiary_address, body.lg_percentage,
+        body.lg_base_value, body.language, body.submission_date, body.requester_name,
+        body.recipient_name)
     return {"message": "Bond created"}
 
 @router.get("/{bond_id}")
@@ -80,10 +117,24 @@ async def get_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_
 @router.patch("/{bond_id}")
 async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
-    allowed = ["bond_number","bond_amount","issue_date","expiry_date","issuer_bank","beneficiary","status","notes"]
+    allowed = ["bond_number","bond_amount","issue_date","expiry_date","issuer_bank","beneficiary","status","notes",
+               "bid_ref","bid_subject","beneficiary_address","lg_percentage","lg_base_value","language",
+               "submission_date","requester_name","recipient_name"]
+    data = body.dict(exclude_none=True)
+    # Same derive-don't-duplicate rule as create: if the request updates the
+    # percentage or base value without also typing a new bond_amount, keep
+    # bond_amount in sync with them rather than leaving a stale figure.
+    if "bond_amount" not in data and ("lg_percentage" in data or "lg_base_value" in data):
+        current = await fetch_one(conn, "SELECT lg_percentage, lg_base_value FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
+        if current:
+            pct = data.get("lg_percentage", current["lg_percentage"])
+            base = data.get("lg_base_value", current["lg_base_value"])
+            if pct is not None and base is not None:
+                data["bond_amount"] = round(float(base) * float(pct) / 100, 2)
+
     updates = ["updated_at=NOW()"]
     args = []
-    for k, v in body.dict(exclude_none=True).items():
+    for k, v in data.items():
         if k in allowed:
             args.append(v); updates.append(f"{k}=${len(args)}")
     if not args: raise HTTPException(status_code=400, detail="Nothing to update")
@@ -92,8 +143,31 @@ async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), curr
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
     return {"message": "Updated"}
 
+@router.post("/{bond_id}/approve-business-solution")
+async def approve_business_solution(bond_id: int, body: ApprovalRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """First sign-off in the request chain (Requester -> Business Solution -> CBO)
+    before the bank issues the bond — matches the company's own request form."""
+    company_id = require_company(current_user)
+    result = await execute(conn,
+        "UPDATE opportunity_bonds SET business_solution_approver=$1, business_solution_approved_at=NOW() WHERE bond_id=$2 AND company_id=$3",
+        body.approver_name, bond_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
+    return {"message": "Business Solution approval recorded"}
+
+@router.post("/{bond_id}/approve-cbo")
+async def approve_cbo(bond_id: int, body: ApprovalRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """Second, final sign-off in the request chain, per the company's form."""
+    company_id = require_company(current_user)
+    result = await execute(conn,
+        "UPDATE opportunity_bonds SET cbo_approver=$1, cbo_approved_at=NOW() WHERE bond_id=$2 AND company_id=$3",
+        body.approver_name, bond_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
+    return {"message": "CBO approval recorded"}
+
 @router.post("/{bond_id}/approve")
 async def approve_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """The bank has actually issued the bond — distinct from the two internal
+    sign-offs above, which happen before the request is even sent to the bank."""
     company_id = require_company(current_user)
     result = await execute(conn, "UPDATE opportunity_bonds SET approved_by=$1, approved_at=NOW(), status='ISSUED' WHERE bond_id=$2 AND company_id=$3",
         current_user.user_id, bond_id, company_id)

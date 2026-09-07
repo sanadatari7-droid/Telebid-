@@ -1168,6 +1168,27 @@ CREATE TABLE IF NOT EXISTS opportunity_bonds (
     updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Fields from the company's actual Bid Bond Request form (a formal L/G
+-- request that goes To/From named people and through a two-person sign-off
+-- before the bank issues the bond) — bond_amount above stays the source of
+-- truth for reporting/KPIs, computed from lg_percentage x lg_base_value at
+-- write time when both are given, so it never drifts from the % the form
+-- actually specifies.
+ALTER TABLE opportunity_bonds
+    ADD COLUMN IF NOT EXISTS bid_ref             VARCHAR(100),  -- company's own RFP reference, e.g. "SLM-RF: MAU-26-166-CP"
+    ADD COLUMN IF NOT EXISTS bid_subject         VARCHAR(300),
+    ADD COLUMN IF NOT EXISTS beneficiary_address VARCHAR(300),
+    ADD COLUMN IF NOT EXISTS lg_percentage       NUMERIC(5,2),  -- e.g. 1.00 for "One Percent (1%)"
+    ADD COLUMN IF NOT EXISTS lg_base_value       NUMERIC(18,2), -- the SR amount the percentage is taken of
+    ADD COLUMN IF NOT EXISTS language            VARCHAR(20) DEFAULT 'Arabic',
+    ADD COLUMN IF NOT EXISTS submission_date     DATE,
+    ADD COLUMN IF NOT EXISTS requester_name      VARCHAR(150),  -- "From"
+    ADD COLUMN IF NOT EXISTS recipient_name      VARCHAR(150),  -- "To"
+    ADD COLUMN IF NOT EXISTS business_solution_approver    VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS business_solution_approved_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS cbo_approver                  VARCHAR(150),
+    ADD COLUMN IF NOT EXISTS cbo_approved_at               TIMESTAMPTZ;
+
 -- ============================================================
 -- FROM IMAGES: RFP Source is single-select (radio), not multi-check
 -- Add source_single column to opportunities_v2

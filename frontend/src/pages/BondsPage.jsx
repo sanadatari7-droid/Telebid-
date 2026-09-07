@@ -20,6 +20,13 @@ const STATUS_STYLE = {
   RELEASED:  "bg-blue-100 text-blue-700",
 }
 
+const EMPTY_BOND = {
+  opp_id:"", bond_type:"NEW_BOND", bond_number:"", bond_amount:"",
+  issue_date:"", expiry_date:"", issuer_bank:"", beneficiary:"", notes:"",
+  bid_ref:"", bid_subject:"", beneficiary_address:"", lg_percentage:"", lg_base_value:"",
+  language:"Arabic", submission_date:"", requester_name:"", recipient_name:"",
+}
+
 function BondModal({ bond, onClose }) {
   const qc = useQueryClient()
   const isNew = !bond?.bond_id
@@ -27,19 +34,33 @@ function BondModal({ bond, onClose }) {
     queryKey:["opps-v2-all"],
     queryFn:()=>oppsV2Api.list({page_size:200}).then(r=>r.data?.items||[])
   })
-  const [form, setForm] = useState(bond || { opp_id:"", bond_type:"NEW_BOND", bond_number:"", bond_amount:"", issue_date:"", expiry_date:"", issuer_bank:"", beneficiary:"", notes:"" })
+  const [form, setForm] = useState(bond ? {...EMPTY_BOND, ...bond} : EMPTY_BOND)
   const fc = e => setForm(p=>({...p,[e.target.name]:e.target.value}))
+  const [approverInput, setApproverInput] = useState({ business_solution:"", cbo:"" })
+
+  const computedLg = form.lg_percentage && form.lg_base_value
+    ? (Number(form.lg_base_value) * Number(form.lg_percentage) / 100)
+    : null
 
   const saveMut = useMutation({
     mutationFn: () => isNew
-      ? bondsApi.create({...form, opp_id:Number(form.opp_id), bond_amount:form.bond_amount?Number(form.bond_amount):null})
-      : bondsApi.update(bond.bond_id, {...form, bond_amount:form.bond_amount?Number(form.bond_amount):null}),
+      ? bondsApi.create({...form, opp_id:Number(form.opp_id), bond_amount:form.bond_amount?Number(form.bond_amount):null,
+          lg_percentage:form.lg_percentage?Number(form.lg_percentage):null, lg_base_value:form.lg_base_value?Number(form.lg_base_value):null})
+      : bondsApi.update(bond.bond_id, {...form, bond_amount:form.bond_amount?Number(form.bond_amount):null,
+          lg_percentage:form.lg_percentage?Number(form.lg_percentage):null, lg_base_value:form.lg_base_value?Number(form.lg_base_value):null}),
     onSuccess: () => { toast.success(isNew?"Bond created":"Bond updated"); qc.invalidateQueries({queryKey:["bonds"]}); qc.invalidateQueries({queryKey:["bond-stats"]}); onClose() }
   })
 
+  const approveMut = useMutation({
+    mutationFn: ({ stage, name }) => stage === "business_solution"
+      ? bondsApi.approveBusinessSolution(bond.bond_id, name)
+      : bondsApi.approveCbo(bond.bond_id, name),
+    onSuccess: () => { toast.success("Approval recorded"); qc.invalidateQueries({queryKey:["bonds"]}) }
+  })
+
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="font-bold text-gray-900">{isNew?"New Bond":"Edit Bond"}</h2>
           <button className="btn-ghost p-2" onClick={onClose}><X size={16}/></button>
@@ -66,17 +87,92 @@ function BondModal({ bond, onClose }) {
               ))}
             </div>
           </div>
+
           <div className="grid grid-cols-2 gap-4">
+            <div><label className="label">Bid No. (Ref.)</label><input name="bid_ref" className="input" placeholder="e.g. SLM-RF: MAU-26-166-CP" value={form.bid_ref||""} onChange={fc}/></div>
             <div><label className="label">Bond Number</label><input name="bond_number" className="input" value={form.bond_number||""} onChange={fc}/></div>
-            <div><label className="label">Bond Amount</label><input name="bond_amount" type="number" className="input" value={form.bond_amount||""} onChange={fc}/></div>
           </div>
+          <div><label className="label">Bid Subject</label><input name="bid_subject" className="input" value={form.bid_subject||""} onChange={fc}/></div>
+
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="label">Issue Date</label><input name="issue_date" type="date" className="input" value={form.issue_date||""} onChange={fc}/></div>
-            <div><label className="label">Expiry Date</label><input name="expiry_date" type="date" className="input" value={form.expiry_date||""} onChange={fc}/></div>
+            <div><label className="label">Beneficiary</label><input name="beneficiary" className="input" value={form.beneficiary||""} onChange={fc}/></div>
+            <div><label className="label">Beneficiary Address</label><input name="beneficiary_address" className="input" value={form.beneficiary_address||""} onChange={fc}/></div>
           </div>
-          <div><label className="label">Issuer Bank</label><input name="issuer_bank" className="input" value={form.issuer_bank||""} onChange={fc}/></div>
-          <div><label className="label">Beneficiary</label><input name="beneficiary" className="input" value={form.beneficiary||""} onChange={fc}/></div>
+
+          <div className="card-sm bg-gray-50">
+            <div className="section-title text-xs mb-2">L/G Value &amp; Percentage</div>
+            <div className="grid grid-cols-3 gap-3 items-end">
+              <div><label className="label">Percentage %</label><input name="lg_percentage" type="number" step="0.01" className="input" placeholder="1" value={form.lg_percentage||""} onChange={fc}/></div>
+              <div><label className="label">Base Value (SR)</label><input name="lg_base_value" type="number" className="input" value={form.lg_base_value||""} onChange={fc}/></div>
+              <div><label className="label">Bond Amount</label>
+                <input name="bond_amount" type="number" className="input" placeholder={computedLg ? computedLg.toLocaleString() : ""} value={form.bond_amount||""} onChange={fc}/>
+              </div>
+            </div>
+            {computedLg != null && !form.bond_amount && (
+              <p className="text-xs text-gray-500 mt-1.5">
+                = {form.lg_percentage}% of SR {Number(form.lg_base_value).toLocaleString()} → <strong>SR {computedLg.toLocaleString()}</strong> (auto-calculated if Bond Amount is left blank)
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div><label className="label">Submission Date</label><input name="submission_date" type="date" className="input" value={form.submission_date||""} onChange={fc}/></div>
+            <div><label className="label">Issue Date</label><input name="issue_date" type="date" className="input" value={form.issue_date||""} onChange={fc}/></div>
+            <div><label className="label">L/G Validity (Expiry)</label><input name="expiry_date" type="date" className="input" value={form.expiry_date||""} onChange={fc}/></div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="label">Issuer Bank</label><input name="issuer_bank" className="input" value={form.issuer_bank||""} onChange={fc}/></div>
+            <div>
+              <label className="label">Language</label>
+              <select name="language" className="input" value={form.language||"Arabic"} onChange={fc}>
+                <option value="Arabic">Arabic</option>
+                <option value="English">English</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="label">Requester (From)</label><input name="requester_name" className="input" value={form.requester_name||""} onChange={fc}/></div>
+            <div><label className="label">Recipient (To)</label><input name="recipient_name" className="input" value={form.recipient_name||""} onChange={fc}/></div>
+          </div>
+
           <div><label className="label">Notes</label><textarea name="notes" className="input" rows={2} value={form.notes||""} onChange={fc}/></div>
+
+          {!isNew && (
+            <div className="card-sm bg-blue-50 border-blue-100">
+              <div className="section-title text-xs mb-2">Approval Chain</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Business Solution</label>
+                  {bond.business_solution_approver ? (
+                    <p className="text-sm text-green-700 font-medium">✓ {bond.business_solution_approver}</p>
+                  ) : (
+                    <div className="flex gap-1.5">
+                      <input className="input !py-1.5" placeholder="Approver name" value={approverInput.business_solution}
+                        onChange={e=>setApproverInput(p=>({...p,business_solution:e.target.value}))}/>
+                      <button className="btn-secondary btn-sm" disabled={!approverInput.business_solution||approveMut.isPending}
+                        onClick={()=>approveMut.mutate({stage:"business_solution", name:approverInput.business_solution})}>Record</button>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="label">CBO</label>
+                  {bond.cbo_approver ? (
+                    <p className="text-sm text-green-700 font-medium">✓ {bond.cbo_approver}</p>
+                  ) : (
+                    <div className="flex gap-1.5">
+                      <input className="input !py-1.5" placeholder="Approver name" value={approverInput.cbo}
+                        onChange={e=>setApproverInput(p=>({...p,cbo:e.target.value}))}/>
+                      <button className="btn-secondary btn-sm" disabled={!approverInput.cbo||approveMut.isPending}
+                        onClick={()=>approveMut.mutate({stage:"cbo", name:approverInput.cbo})}>Record</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3 justify-end pt-2">
             <button className="btn-secondary" onClick={onClose}>Cancel</button>
             <button className="btn-primary" disabled={saveMut.isPending||(!form.opp_id&&isNew)} onClick={()=>saveMut.mutate()}>

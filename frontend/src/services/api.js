@@ -337,6 +337,8 @@ export const bondsApi = {
   approve: id => api.post(`/bonds/${id}/approve`),
   delete:  id => api.delete(`/bonds/${id}`),
   stats:   () => api.get("/bonds/stats/summary"),
+  approveBusinessSolution: (id, approver_name) => api.post(`/bonds/${id}/approve-business-solution`, { approver_name }),
+  approveCbo:              (id, approver_name) => api.post(`/bonds/${id}/approve-cbo`, { approver_name }),
 }
 
 // ── AI ALERTS (scheduler) ─────────────────────────────────────────────────────
