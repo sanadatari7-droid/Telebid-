@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import date
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, CurrentUser
 
@@ -11,7 +11,7 @@ class BondCreate(BaseModel):
     opp_id: int
     bond_type: str           # NEW_BOND, BID_BOND, FINAL_BOND
     bond_number: Optional[str] = None
-    bond_amount: Optional[float] = None
+    bond_amount: Optional[float] = Field(None, ge=0)
     currency_id: int = 1
     issue_date: Optional[date] = None
     expiry_date: Optional[date] = None
@@ -23,8 +23,8 @@ class BondCreate(BaseModel):
     bid_ref: Optional[str] = None              # company's own RFP reference, e.g. "SLM-RF: MAU-26-166-CP"
     bid_subject: Optional[str] = None
     beneficiary_address: Optional[str] = None
-    lg_percentage: Optional[float] = None      # e.g. 1.0 for "One Percent (1%)"
-    lg_base_value: Optional[float] = None      # the SR amount the percentage is taken of
+    lg_percentage: Optional[float] = Field(None, ge=0, le=100)  # e.g. 1.0 for "One Percent (1%)"
+    lg_base_value: Optional[float] = Field(None, ge=0)      # the SR amount the percentage is taken of
     language: Optional[str] = "Arabic"
     submission_date: Optional[date] = None
     requester_name: Optional[str] = None       # "From"
@@ -32,7 +32,7 @@ class BondCreate(BaseModel):
 
 class BondUpdate(BaseModel):
     bond_number: Optional[str] = None
-    bond_amount: Optional[float] = None
+    bond_amount: Optional[float] = Field(None, ge=0)
     issue_date: Optional[date] = None
     expiry_date: Optional[date] = None
     issuer_bank: Optional[str] = None
@@ -42,8 +42,8 @@ class BondUpdate(BaseModel):
     bid_ref: Optional[str] = None
     bid_subject: Optional[str] = None
     beneficiary_address: Optional[str] = None
-    lg_percentage: Optional[float] = None
-    lg_base_value: Optional[float] = None
+    lg_percentage: Optional[float] = Field(None, ge=0, le=100)
+    lg_base_value: Optional[float] = Field(None, ge=0)
     language: Optional[str] = None
     submission_date: Optional[date] = None
     requester_name: Optional[str] = None

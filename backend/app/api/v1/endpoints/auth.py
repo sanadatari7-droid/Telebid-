@@ -6,7 +6,7 @@ from app.core.security import (
 )
 from app.core.config import settings
 from app.middleware.auth import require_roles, CurrentUser
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
 import secrets, re
 
@@ -25,7 +25,7 @@ class OTPVerify(BaseModel):
 
 class RegisterRequest(BaseModel):
     username: str
-    email: str
+    email: EmailStr
     password: str
     full_name: str
     job_title: str = ""
@@ -35,7 +35,7 @@ class TenantSignupRequest(BaseModel):
     company_name: str
     company_code: str
     admin_username: str
-    admin_email: str
+    admin_email: EmailStr
     admin_password: str
     admin_full_name: str
 
@@ -244,11 +244,11 @@ async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
     authenticated POST /auth/register below instead."""
     _validate_password(body.admin_password)
 
-    existing_company = await fetch_val(conn, "SELECT company_id FROM companies WHERE company_code=$1", body.company_code)
+    existing_company = await fetch_val(conn, "SELECT company_id FROM companies WHERE UPPER(company_code)=UPPER($1)", body.company_code)
     if existing_company:
         raise HTTPException(status_code=409, detail="Company code already in use")
     existing_user = await fetch_one(conn,
-        "SELECT user_id FROM users WHERE username=$1 OR email=$2", body.admin_username, body.admin_email)
+        "SELECT user_id FROM users WHERE username=$1 OR UPPER(email)=UPPER($2)", body.admin_username, body.admin_email)
     if existing_user:
         raise HTTPException(status_code=409, detail="Username or email already exists")
 
@@ -256,7 +256,7 @@ async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
     async with conn.transaction():
         company_id = await fetch_val(conn,
             "INSERT INTO companies (company_code, company_name, is_active) VALUES ($1,$2,TRUE) RETURNING company_id",
-            body.company_code, body.company_name)
+            body.company_code.upper(), body.company_name)
         uid = await fetch_val(conn, """
             INSERT INTO users (username, email, password_hash, full_name, is_active, otp_enabled, company_id)
             VALUES ($1,$2,$3,$4,TRUE,FALSE,$5) RETURNING user_id""",

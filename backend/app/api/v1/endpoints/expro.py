@@ -63,7 +63,7 @@ async def delete_field_def(field_def_id: int, conn=Depends(get_db),
     return {"message": "Field deactivated"}
 
 @router.get("/logs")
-async def list_logs(page: int=Query(1,ge=1), page_size: int=Query(20),
+async def list_logs(page: int=Query(1,ge=1), page_size: int=Query(20,ge=1,le=500),
     bid_id: Optional[int]=None, status: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)

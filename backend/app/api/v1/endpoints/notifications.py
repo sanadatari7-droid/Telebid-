@@ -5,7 +5,7 @@ from app.middleware.auth import get_current_user, CurrentUser
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 @router.get("")
-async def get_notifications(page:int=Query(1,ge=1), page_size:int=Query(20),
+async def get_notifications(page:int=Query(1,ge=1), page_size:int=Query(20,ge=1,le=500),
                             unread_only:bool=False, conn=Depends(get_db),
                             current_user:CurrentUser=Depends(get_current_user)):
     args = [current_user.user_id]

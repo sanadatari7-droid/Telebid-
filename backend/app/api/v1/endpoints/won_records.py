@@ -210,7 +210,7 @@ async def create_won_from_opportunity(
 @router.get("")
 async def list_won_records(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20),
+    page_size: int = Query(20,ge=1,le=500),
     search: Optional[str] = None,
     won_status: Optional[str] = None,
     invoice_status: Optional[str] = None,

@@ -7,7 +7,7 @@ router = APIRouter(prefix="/bid-logs", tags=["Bid Logs"])
 
 @router.get("")
 async def get_bid_logs(
-    page: int=Query(1,ge=1), page_size: int=Query(50),
+    page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=500),
     bid_id: Optional[int]=None, module: Optional[str]=None,
     user_id: Optional[int]=None, action: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
@@ -31,7 +31,7 @@ async def get_bid_logs(
     return await fetch_page(conn, sql, args, page, page_size)
 
 @router.get("/evaluation-logs")
-async def get_eval_logs(page: int=Query(1,ge=1), page_size: int=Query(50),
+async def get_eval_logs(page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=500),
     bid_id: Optional[int]=None, conn=Depends(get_db),
     current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
@@ -47,7 +47,7 @@ async def get_eval_logs(page: int=Query(1,ge=1), page_size: int=Query(50),
     return await fetch_page(conn, sql, args, page, page_size)
 
 @router.get("/user-activity")
-async def user_activity(page: int=Query(1,ge=1), page_size: int=Query(50),
+async def user_activity(page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=500),
     conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
     sql = """SELECT al.*, u.full_name AS user_name, u.username, u.email

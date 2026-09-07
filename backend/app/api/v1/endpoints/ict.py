@@ -26,7 +26,7 @@ class ICTProjectCreate(BaseModel):
     notes: Optional[str] = None
 
 @router.get("")
-async def list_ict(page: int=Query(1,ge=1), page_size: int=Query(20),
+async def list_ict(page: int=Query(1,ge=1), page_size: int=Query(20,ge=1,le=500),
     search: Optional[str]=None, cat_code: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)

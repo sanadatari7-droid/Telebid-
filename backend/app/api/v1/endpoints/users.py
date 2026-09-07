@@ -47,7 +47,7 @@ async def get_me(conn=Depends(get_db), current_user: CurrentUser=Depends(get_cur
     return user
 
 @router.get("")
-async def list_users(page: int=Query(1,ge=1), page_size: int=Query(50),
+async def list_users(page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=500),
     search: Optional[str]=None, conn=Depends(get_db),
     current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)

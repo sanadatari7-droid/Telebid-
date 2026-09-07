@@ -96,7 +96,7 @@ async def create_lost(opp_id: int, body: LostCreate, conn=Depends(get_db), curre
     return {"lost_id": lost_id, "lost_number": lost_number, "opp_id": opp_id, "message": f"LOST record {lost_number} created"}
 
 @router.get("")
-async def list_lost(page: int=Query(1,ge=1), page_size: int=Query(20),
+async def list_lost(page: int=Query(1,ge=1), page_size: int=Query(20,ge=1,le=500),
     search: Optional[str]=None, loss_type: Optional[str]=None,
     conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)

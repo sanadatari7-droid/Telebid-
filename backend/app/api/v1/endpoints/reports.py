@@ -37,7 +37,7 @@ async def vendor_performance(conn=Depends(get_db), current_user=Depends(get_curr
         ORDER BY avg_eval_score DESC NULLS LAST""", company_id)
 
 @router.get("/audit-trail")
-async def audit_trail(page: int=Query(1,ge=1), page_size: int=Query(50),
+async def audit_trail(page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=500),
     conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
     sql = """SELECT al.*, u.full_name AS user_name, u.username

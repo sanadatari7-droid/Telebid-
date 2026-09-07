@@ -3,7 +3,7 @@ from typing import Optional, List
 from datetime import datetime, date
 import json
 import math
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
 from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, fetch_val, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 from app.services.email_service import send_bid_notification
@@ -13,10 +13,10 @@ router = APIRouter(prefix="/opportunities-v2", tags=["Opportunities V2"])
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class OppCreate(BaseModel):
-    customer_name: str
-    customer_name_ar: Optional[str] = None
-    customer_id: Optional[str] = None
-    customer_type: str = "CORPORATE"
+    customer_name: str = Field(..., max_length=200)
+    customer_name_ar: Optional[str] = Field(None, max_length=200)
+    customer_id: Optional[str] = Field(None, max_length=100)
+    customer_type: str = Field("CORPORATE", max_length=20)
     is_strategic: bool = False
     source_customer_rfp: bool = False
     source_government: bool = False
@@ -24,31 +24,31 @@ class OppCreate(BaseModel):
     source_expro: bool = False
     source_forsah: bool = False
     source_wholesales: bool = False
-    source_single: Optional[str] = None   # ETIMAD, EMAIL, CLIENT, PORTAL (radio - single choice)
-    project_type: Optional[str] = None
-    service_type: Optional[str] = None    # TELECOM or ICT
+    source_single: Optional[str] = Field(None, max_length=20)   # ETIMAD, EMAIL, CLIENT, PORTAL (radio - single choice)
+    project_type: Optional[str] = Field(None, max_length=100)
+    service_type: Optional[str] = Field(None, max_length=10)    # TELECOM or ICT
     service_cat_l1: Optional[int] = None  # Level 1 category
     service_cat_l2: Optional[int] = None  # Level 2 category
-    expro_ref: Optional[str] = None
-    rfp_ref: Optional[str] = None
+    expro_ref: Optional[str] = Field(None, max_length=50)
+    rfp_ref: Optional[str] = Field(None, max_length=100)
     family_id: Optional[int] = None
     solution_id: Optional[int] = None
-    solution_detail: Optional[str] = None
-    media_type: Optional[str] = None
-    sla_type: Optional[str] = None
+    solution_detail: Optional[str] = Field(None, max_length=200)
+    media_type: Optional[str] = Field(None, max_length=30)
+    sla_type: Optional[str] = Field(None, max_length=30)
     bandwidth_mbps: Optional[float] = None
-    quantity: int = 1
-    contract_duration: Optional[str] = None
-    coverage_study: Optional[str] = None
-    nrc: Optional[float] = None
-    mrc: Optional[float] = None
-    tcv: Optional[float] = None
+    quantity: int = Field(1, ge=1)
+    contract_duration: Optional[str] = Field(None, max_length=50)
+    coverage_study: Optional[str] = Field(None, max_length=100)
+    nrc: Optional[float] = Field(None, ge=0)
+    mrc: Optional[float] = Field(None, ge=0)
+    tcv: Optional[float] = Field(None, ge=0)
     currency_id: int = 1
-    project_size: Optional[str] = None
+    project_size: Optional[str] = Field(None, max_length=10)
     description: Optional[str] = None
     sow_detail: Optional[str] = None
-    location_text: Optional[str] = None
-    attachment_url: Optional[str] = None
+    location_text: Optional[str] = Field(None, max_length=300)
+    attachment_url: Optional[str] = Field(None, max_length=500)
     notes: Optional[str] = None
     sales_rep_id: Optional[int] = None
     presales_id: Optional[int] = None
@@ -80,6 +80,12 @@ class OppCreate(BaseModel):
     def _submission_after_questions(cls, v, values):
         if v and values.get("questions_deadline") and v.date() < values["questions_deadline"].date():
             raise ValueError("submission_deadline cannot be before questions_deadline")
+        # Checked directly against rfp_issue_date too, not just transitively
+        # through questions_deadline — an opportunity created without a
+        # questions_deadline must still not have a submission date earlier
+        # than the RFP was issued.
+        if v and values.get("rfp_issue_date") and v.date() < values["rfp_issue_date"]:
+            raise ValueError("submission_deadline cannot be before rfp_issue_date")
         return v
 
     @validator("expected_award_date")
@@ -128,14 +134,14 @@ class CostingSheetUpdate(BaseModel):
 class CostingLineCreate(BaseModel):
     service_name: str
     bandwidth_mbps: Optional[float] = None
-    qty: int = 1
+    qty: int = Field(1, ge=1)
     duration_months: Optional[int] = None
-    price_list_mrc: float = 0
-    price_list_nrc: float = 0
+    price_list_mrc: float = Field(0, ge=0)
+    price_list_nrc: float = Field(0, ge=0)
     expro_mrc: Optional[float] = None
     expro_nrc: Optional[float] = None
-    discount_mrc_pct: float = 0  # fraction 0-1, e.g. 0.85
-    discount_nrc_pct: float = 0
+    discount_mrc_pct: float = Field(0, ge=0, le=1)  # fraction 0-1, e.g. 0.85
+    discount_nrc_pct: float = Field(0, ge=0, le=1)
 
 class QuestionCreate(BaseModel):
     question_text: str
@@ -279,7 +285,7 @@ async def _update_questions_count(conn, opp_id: int):
 
 @router.get("")
 async def list_opps(
-    page: int=Query(1,ge=1), page_size: int=Query(20),
+    page: int=Query(1,ge=1), page_size: int=Query(20,ge=1,le=500),
     search: Optional[str]=None, status: Optional[str]=None,
     sales_rep_id: Optional[int]=None, presales_id: Optional[int]=None,
     bid_manager_id: Optional[int]=None, family_id: Optional[int]=None,
@@ -530,6 +536,11 @@ async def update_opp(opp_id: int, body: dict, conn=Depends(get_db), current_user
                "sales_rep_id","presales_id","bid_manager_id",
                "rfp_issue_date","questions_deadline","submission_deadline","expected_award_date","bond_required","manager_id","bond_reminder_sent","expro_required",
                "presales_comments","sales_comments","bid_comments","finance_comments","phase"]
+    max_lengths = {"customer_name": 200, "customer_name_ar": 200, "customer_id": 100, "customer_type": 20,
+                   "source_single": 20, "project_type": 100, "service_type": 10, "expro_ref": 50, "rfp_ref": 100,
+                   "solution_detail": 200, "media_type": 30, "sla_type": 30, "contract_duration": 50,
+                   "coverage_study": 100, "project_size": 10, "location_text": 300, "attachment_url": 500}
+    min_bounds = {"nrc": 0, "mrc": 0, "tcv": 0, "quantity": 1}
     company_id = require_company(current_user)
     updates = ["updated_at=NOW()", f"updated_by={current_user.user_id}"]
     args = []
@@ -537,6 +548,10 @@ async def update_opp(opp_id: int, body: dict, conn=Depends(get_db), current_user
     if not old: raise HTTPException(status_code=404, detail="Opportunity not found")
     for k, v in body.items():
         if k in allowed:
+            if k in max_lengths and v is not None and len(str(v)) > max_lengths[k]:
+                raise HTTPException(status_code=422, detail=f"{k} must be at most {max_lengths[k]} characters")
+            if k in min_bounds and v is not None and v < min_bounds[k]:
+                raise HTTPException(status_code=422, detail=f"{k} must be at least {min_bounds[k]}")
             args.append(v); updates.append(f"{k}=${len(args)}")
             if str(old.get(k)) != str(v):
                 await _log(conn, opp_id, "UPDATED", current_user.user_id, k, old.get(k), v)
@@ -620,8 +635,10 @@ async def mark_won(opp_id: int, body: WonRecord, conn=Depends(get_db), current_u
                 detail="This opportunity requires EXPRO/authority approval before it can be marked WON, "
                        "and no approved EXPRO log was found for it. Submit and get an EXPRO log approved first, "
                        "or clear the 'EXPRO required' flag if it no longer applies.")
-    await execute(conn,
-        "UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, order_summary=$3, tcv=COALESCE($4,tcv), updated_at=NOW() WHERE opp_id=$5 AND company_id=$6",
+    await execute(conn, """
+        UPDATE opportunities_v2 SET status='WON', phase='Won', won_date=$1, order_number=$2, order_summary=$3, tcv=COALESCE($4,tcv), updated_at=NOW(),
+            lost_date=NULL, loss_reason=NULL, loss_type=NULL, competitor_name=NULL, winner_name=NULL, winner_tcv=NULL
+        WHERE opp_id=$5 AND company_id=$6""",
         body.won_date, body.order_number, body.order_summary, body.tcv, opp_id, company_id)
     await _log(conn, opp_id, "MARKED_WON", current_user.user_id, comments=f"Order: {body.order_number}")
     return {"message": "Marked WON"}
@@ -630,8 +647,10 @@ async def mark_won(opp_id: int, body: WonRecord, conn=Depends(get_db), current_u
 async def mark_lost(opp_id: int, body: LostRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
     await _own_opp_or_404(conn, opp_id, company_id)
-    await execute(conn,
-        "UPDATE opportunities_v2 SET status='LOST', phase='Dropped', lost_date=$1, loss_reason=$2, loss_type=$3, competitor_name=$4, winner_name=$5, winner_tcv=$6, updated_at=NOW() WHERE opp_id=$7 AND company_id=$8",
+    await execute(conn, """
+        UPDATE opportunities_v2 SET status='LOST', phase='Dropped', lost_date=$1, loss_reason=$2, loss_type=$3, competitor_name=$4, winner_name=$5, winner_tcv=$6, updated_at=NOW(),
+            won_date=NULL, order_number=NULL, order_summary=NULL
+        WHERE opp_id=$7 AND company_id=$8""",
         body.lost_date, body.loss_reason, body.loss_type, body.competitor_name, body.winner_name, body.winner_tcv, opp_id, company_id)
     await _log(conn, opp_id, "MARKED_LOST", current_user.user_id, comments=body.comments or body.loss_reason)
     return {"message": "Marked LOST"}
@@ -914,10 +933,18 @@ async def update_costing_line(opp_id: int, line_id: int, body: dict, conn=Depend
     await _own_opp_or_404(conn, opp_id, company_id)
     allowed = ["service_name", "bandwidth_mbps", "qty", "duration_months", "price_list_mrc", "price_list_nrc",
                "expro_mrc", "expro_nrc", "discount_mrc_pct", "discount_nrc_pct", "sort_order"]
+    # Same bounds as CostingLineCreate — this endpoint takes a raw dict (partial
+    # update), so pydantic's Field(ge=..., le=...) never runs unless checked here too.
+    bounds = {"qty": (1, None), "price_list_mrc": (0, None), "price_list_nrc": (0, None),
+              "discount_mrc_pct": (0, 1), "discount_nrc_pct": (0, 1)}
     updates = ["updated_at=NOW()"]
     args = []
     for k, v in body.items():
         if k in allowed:
+            if k in bounds:
+                lo, hi = bounds[k]
+                if (lo is not None and v < lo) or (hi is not None and v > hi):
+                    raise HTTPException(status_code=422, detail=f"{k} must be between {lo} and {hi if hi is not None else 'any positive value'}")
             args.append(v); updates.append(f"{k}=${len(args)}")
     if not args:
         raise HTTPException(status_code=400, detail="Nothing to update")
