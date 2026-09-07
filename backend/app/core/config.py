@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from typing import List
 
 class Settings(BaseSettings):
+    ENVIRONMENT: str = "development"
     DATABASE_URL: str = "postgresql://telebid:telebid123@localhost:5432/telebid"
     JWT_SECRET_KEY: str = "change-me-in-production-min-32-chars!!"
     JWT_ALGORITHM: str = "HS256"

@@ -449,12 +449,15 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
+_is_production = settings.ENVIRONMENT.lower() == "production"
+
 app = FastAPI(
     title="TeleBid Enterprise API",
     description="Enterprise Bid & Tender Management System",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
+    docs_url=None if _is_production else "/api/docs",
+    redoc_url=None if _is_production else "/api/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
     lifespan=lifespan
 )
 
@@ -480,6 +483,14 @@ async def timing(request: Request, call_next):
     try:
         response = await call_next(request)
         response.headers["X-Process-Time"] = f"{time.time()-start:.4f}s"
+        # Defense-in-depth headers — this is a JSON API behind a React SPA, not
+        # a page an attacker can get framed or MIME-sniffed on its own, but
+        # these are cheap and expected practice regardless.
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "same-origin"
+        if _is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
     except Exception as exc:
         logger.error(f"Request error on {request.method} {request.url}: {exc}", exc_info=True)

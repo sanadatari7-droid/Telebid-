@@ -1,3 +1,4 @@
+import html
 import logging
 import aiosmtplib
 from email.mime.text import MIMEText
@@ -5,6 +6,13 @@ from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+def _esc(value) -> str:
+    """Escape a value before it's interpolated into an HTML email body —
+    these templates are built with plain f-strings, so anything derived
+    from user input (customer names, opportunity titles, etc.) must be
+    escaped here or it renders as live HTML in a real inbox."""
+    return html.escape(str(value)) if value is not None else ""
 
 async def _get_smtp_config() -> dict:
     try:
@@ -63,10 +71,10 @@ async def send_otp_email(to: str, full_name: str, otp_code: str) -> bool:
         <p style="color:#afc3e8;margin:5px 0 0">Bid &amp; Tender Management System</p>
       </div>
       <div style="background:#f8fafc;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
-        <p style="color:#374151;font-size:15px">Hello <strong>{full_name}</strong>,</p>
+        <p style="color:#374151;font-size:15px">Hello <strong>{_esc(full_name)}</strong>,</p>
         <p style="color:#6b7280">Your login verification code is:</p>
         <div style="background:white;border:2px solid #1e4080;border-radius:12px;padding:20px;text-align:center;margin:20px 0">
-          <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1e4080">{otp_code}</div>
+          <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#1e4080">{_esc(otp_code)}</div>
           <p style="color:#9ca3af;font-size:12px;margin:8px 0 0">Valid for 5 minutes</p>
         </div>
         <p style="color:#6b7280;font-size:13px">If you did not request this, please ignore this email.</p>
@@ -83,9 +91,9 @@ async def send_bid_notification(to: str, full_name: str, subject: str, message: 
         <h1 style="color:white;margin:0;font-size:22px">TeleBid Enterprise</h1>
       </div>
       <div style="background:#f8fafc;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
-        <p style="color:#374151">Hello <strong>{full_name}</strong>,</p>
-        <p style="color:#374151">{message}</p>
-        {f'<div style="background:#eff6ff;border-left:4px solid #1e4080;padding:12px;border-radius:4px;margin:16px 0"><strong style="color:#1e4080">{bid_number}</strong></div>' if bid_number else ""}
+        <p style="color:#374151">Hello <strong>{_esc(full_name)}</strong>,</p>
+        <p style="color:#374151">{_esc(message)}</p>
+        {f'<div style="background:#eff6ff;border-left:4px solid #1e4080;padding:12px;border-radius:4px;margin:16px 0"><strong style="color:#1e4080">{_esc(bid_number)}</strong></div>' if bid_number else ""}
         <p style="color:#6b7280;font-size:12px">Login to TeleBid Enterprise to view details.</p>
       </div>
     </div>"""
@@ -99,11 +107,11 @@ async def send_deadline_reminder(to: str, full_name: str, bid_number: str, bid_t
         <h1 style="color:white;margin:0;font-size:20px">{urgency}: Bid Deadline</h1>
       </div>
       <div style="background:#f8fafc;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
-        <p style="color:#374151">Hello <strong>{full_name}</strong>,</p>
+        <p style="color:#374151">Hello <strong>{_esc(full_name)}</strong>,</p>
         <p style="color:#374151">The following bid deadline is approaching:</p>
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0">
-          <div style="font-weight:bold;color:#1e4080">{bid_number}</div>
-          <div style="color:#374151;margin:4px 0">{bid_title}</div>
+          <div style="font-weight:bold;color:#1e4080">{_esc(bid_number)}</div>
+          <div style="color:#374151;margin:4px 0">{_esc(bid_title)}</div>
           <div style="color:{'#dc2626' if days_left<=2 else '#f59e0b'};font-weight:bold;font-size:18px">{days_left} day{'s' if days_left!=1 else ''} remaining</div>
         </div>
         <p style="color:#6b7280;font-size:12px">Please take action immediately in TeleBid Enterprise.</p>
@@ -134,24 +142,24 @@ async def send_bond_reminder(to: str, full_name: str, opp_number: str, customer_
         <h1 style="color:white;margin:8px 0 0;font-size:20px">{headline}</h1>
       </div>
       <div style="background:#f8fafc;padding:30px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
-        <p style="color:#374151;font-size:15px">Hello <strong>{full_name}</strong>,</p>
-        <p style="color:#6b7280">{intro}</p>
+        <p style="color:#374151;font-size:15px">Hello <strong>{_esc(full_name)}</strong>,</p>
+        <p style="color:#6b7280">{_esc(intro)}</p>
 
         <div style="background:white;border:2px solid {color};border-radius:12px;padding:20px;margin:20px 0">
           <table style="width:100%;border-collapse:collapse">
             <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:45%">Opportunity #</td>
-                <td style="padding:8px 0;font-weight:bold;color:#111827">{opp_number}</td></tr>
+                <td style="padding:8px 0;font-weight:bold;color:#111827">{_esc(opp_number)}</td></tr>
             <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-top:1px solid #f3f4f6">Customer</td>
-                <td style="padding:8px 0;font-weight:bold;color:#111827;border-top:1px solid #f3f4f6">{customer_name}</td></tr>
+                <td style="padding:8px 0;font-weight:bold;color:#111827;border-top:1px solid #f3f4f6">{_esc(customer_name)}</td></tr>
             <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-top:1px solid #f3f4f6">Submission Deadline</td>
-                <td style="padding:8px 0;font-weight:bold;color:#dc2626;border-top:1px solid #f3f4f6">{submission_deadline}</td></tr>
+                <td style="padding:8px 0;font-weight:bold;color:#dc2626;border-top:1px solid #f3f4f6">{_esc(submission_deadline)}</td></tr>
             <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-top:1px solid #f3f4f6">Days Remaining</td>
                 <td style="padding:8px 0;font-weight:bold;color:#dc2626;border-top:1px solid #f3f4f6">{days_left} days</td></tr>
           </table>
         </div>
 
         <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:14px;border-radius:4px;margin:16px 0">
-          <strong style="color:#92400e">⚡ {action_text}</strong>
+          <strong style="color:#92400e">⚡ {_esc(action_text)}</strong>
         </div>
 
         <p style="color:#6b7280;font-size:12px;margin-top:24px">
@@ -186,27 +194,27 @@ async def send_ai_alert_email(to: str, full_name: str, headline: str, reason: st
     <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
       <div style="background:{color};padding:22px;border-radius:12px 12px 0 0;text-align:center">
         <div style="font-size:28px">{dot}</div>
-        <h1 style="color:white;margin:6px 0 0;font-size:19px">{headline}</h1>
-        <p style="color:rgba(255,255,255,.85);margin:4px 0 0;font-size:11px;letter-spacing:.5px;text-transform:uppercase">{source_tag} · {severity}</p>
+        <h1 style="color:white;margin:6px 0 0;font-size:19px">{_esc(headline)}</h1>
+        <p style="color:rgba(255,255,255,.85);margin:4px 0 0;font-size:11px;letter-spacing:.5px;text-transform:uppercase">{_esc(source_tag)} · {_esc(severity)}</p>
       </div>
       <div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
-        <p style="color:#374151;font-size:15px">Hello <strong>{full_name}</strong>,</p>
+        <p style="color:#374151;font-size:15px">Hello <strong>{_esc(full_name)}</strong>,</p>
 
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin:14px 0">
           <table style="width:100%;border-collapse:collapse">
             <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;width:40%">Opportunity #</td>
-                <td style="padding:6px 0;font-weight:bold;color:#111827">{opp_number}</td></tr>
+                <td style="padding:6px 0;font-weight:bold;color:#111827">{_esc(opp_number)}</td></tr>
             <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;border-top:1px solid #f3f4f6">Customer</td>
-                <td style="padding:6px 0;font-weight:bold;color:#111827;border-top:1px solid #f3f4f6">{customer_name}</td></tr>
+                <td style="padding:6px 0;font-weight:bold;color:#111827;border-top:1px solid #f3f4f6">{_esc(customer_name)}</td></tr>
           </table>
         </div>
 
         <p style="color:#374151;margin:14px 0 4px;font-size:13px;font-weight:bold">Why this was flagged</p>
-        <p style="color:#4b5563;font-size:14px;margin:0 0 14px">{reason}</p>
+        <p style="color:#4b5563;font-size:14px;margin:0 0 14px">{_esc(reason)}</p>
 
         <div style="background:#eff6ff;border-left:4px solid {color};padding:12px;border-radius:4px;margin:14px 0">
           <strong style="color:#1e4080;font-size:13px">Recommended action:</strong>
-          <span style="color:#374151;font-size:13px"> {recommended_action}</span>
+          <span style="color:#374151;font-size:13px"> {_esc(recommended_action)}</span>
         </div>
 
         <p style="color:#6b7280;font-size:12px;margin-top:20px">Login to TeleBid Enterprise to review and act.</p>
