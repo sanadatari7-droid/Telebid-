@@ -8,6 +8,7 @@ import { FileText, CheckCircle2, Clock, DollarSign, XCircle, AlertCircle,
 import { useNavigate } from "react-router-dom"
 import { fmt } from "../utils/fmt"
 import clsx from "clsx"
+import { useTranslation } from "react-i18next"
 
 const PALETTE = ["#3b82f6","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#ec4899"]
 
@@ -63,6 +64,7 @@ function DeadlineCard({ opp }) {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
 
   const { data: bidsData, isLoading: bidsLoading } = useQuery({
     queryKey: ["dashboard"],
@@ -99,15 +101,15 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Procurement & bid management overview</p>
+          <h1 className="page-title">{t("dashboard.title")}</h1>
+          <p className="page-subtitle">{t("dashboard.subtitle")}</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-secondary btn-sm" onClick={() => navigate("/rfp-bids")}>
-            <FileText size={13}/> New Opportunity
+            <FileText size={13}/> {t("dashboard.newOpportunity")}
           </button>
           <button className="btn-primary btn-sm" onClick={() => navigate("/bids")}>
-            <Zap size={13}/> New Bid
+            <Zap size={13}/> {t("dashboard.newBid")}
           </button>
         </div>
       </div>
@@ -115,17 +117,17 @@ export default function DashboardPage() {
 
       {/* ── Quick Action Buttons (from dashboard sketch) ─────────────────── */}
       <div className="card-sm">
-        <div className="section-title mb-3">Quick Actions</div>
+        <div className="section-title mb-3">{t("dashboard.quickActions")}</div>
         <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2">
           {[
-            { label:"Company Settings",  path:"/company-settings", color:"bg-gray-700" },
-            { label:"New EXPRO Request", path:"/rfp-bids?new=expro", color:"bg-blue-600" },
-            { label:"Won EXPRO",         path:"/rfp-bids?status=WON&type=EXPRO", color:"bg-emerald-600" },
-            { label:"Lost EXPRO",        path:"/rfp-bids?status=LOST&type=EXPRO", color:"bg-red-600" },
-            { label:"NEW RFP",           path:"/rfp-bids?new=rfp", color:"bg-indigo-600" },
-            { label:"Won RFPs",          path:"/rfp-bids?status=WON", color:"bg-green-600" },
-            { label:"Lost RFPs",         path:"/rfp-bids?status=LOST", color:"bg-red-500" },
-            { label:"New Bond",          path:"/bonds?new=true", color:"bg-amber-600" },
+            { label:t("dashboard.companySettings"),  path:"/company-settings", color:"bg-gray-700" },
+            { label:t("dashboard.newExproRequest"), path:"/rfp-bids?new=expro", color:"bg-blue-600" },
+            { label:t("dashboard.wonExpro"),         path:"/rfp-bids?status=WON&type=EXPRO", color:"bg-emerald-600" },
+            { label:t("dashboard.lostExpro"),        path:"/rfp-bids?status=LOST&type=EXPRO", color:"bg-red-600" },
+            { label:t("dashboard.newRfp"),           path:"/rfp-bids?new=rfp", color:"bg-indigo-600" },
+            { label:t("dashboard.wonRfps"),          path:"/rfp-bids?status=WON", color:"bg-green-600" },
+            { label:t("dashboard.lostRfps"),         path:"/rfp-bids?status=LOST", color:"bg-red-500" },
+            { label:t("dashboard.newBond"),          path:"/bonds?new=true", color:"bg-amber-600" },
           ].map(btn => (
             <button key={btn.label} onClick={()=>navigate(btn.path)}
               className={clsx("flex flex-col items-center justify-center p-3 rounded-xl text-white text-xs font-semibold text-center leading-tight transition-all hover:opacity-90 hover:scale-105 active:scale-95 shadow-sm",btn.color)}>
@@ -136,41 +138,41 @@ export default function DashboardPage() {
         <div className="mt-2 flex gap-2">
           <button onClick={()=>navigate("/bonds?type=BID_BOND")}
             className="flex-1 py-2 px-3 rounded-xl bg-amber-500 text-white text-xs font-semibold text-center hover:bg-amber-600 transition-all">
-            Bid Bond
+            {t("dashboard.bidBond")}
           </button>
           <button onClick={()=>navigate("/bonds?type=FINAL_BOND")}
             className="flex-1 py-2 px-3 rounded-xl bg-amber-700 text-white text-xs font-semibold text-center hover:bg-amber-800 transition-all">
-            Final Bond
+            {t("dashboard.finalBond")}
           </button>
         </div>
       </div>
 
       {/* Bids KPIs */}
       <div>
-        <div className="section-title">Bids Overview</div>
+        <div className="section-title">{t("dashboard.bidsOverview")}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-4 gap-3">
-          <KPI label="Total Bids"         value={kpi.total_bids}          icon={FileText}     color="bg-blue-600"    onClick={() => navigate("/bids")}/>
-          <KPI label="Open Bids"          value={kpi.open_bids}           icon={CheckCircle2} color="bg-indigo-500"  onClick={() => navigate("/bids")}/>
-          <KPI label="Awarded"            value={kpi.awarded_bids}        icon={Trophy}       color="bg-emerald-600" onClick={() => navigate("/contracts")}/>
-          <KPI label="Upcoming Deadlines" value={kpi.upcoming_deadlines}  icon={AlertCircle}  color="bg-amber-500"   sub="Next 7 days" onClick={() => navigate("/calendar")}/>
+          <KPI label={t("dashboard.totalBids")}         value={kpi.total_bids}          icon={FileText}     color="bg-blue-600"    onClick={() => navigate("/bids")}/>
+          <KPI label={t("dashboard.openBids")}          value={kpi.open_bids}           icon={CheckCircle2} color="bg-indigo-500"  onClick={() => navigate("/bids")}/>
+          <KPI label={t("dashboard.awarded")}            value={kpi.awarded_bids}        icon={Trophy}       color="bg-emerald-600" onClick={() => navigate("/contracts")}/>
+          <KPI label={t("dashboard.upcomingDeadlines")} value={kpi.upcoming_deadlines}  icon={AlertCircle}  color="bg-amber-500"   sub={t("dashboard.next7Days")} onClick={() => navigate("/calendar")}/>
         </div>
       </div>
 
       {/* Opportunities KPIs */}
       {os.total > 0 && (
         <div>
-          <div className="section-title">Opportunities Pipeline</div>
+          <div className="section-title">{t("dashboard.opportunitiesPipeline")}</div>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-            <KPI label="Total Opps"    value={os.total}            icon={TrendingUp}   color="bg-slate-600"/>
-            <KPI label="Pending"       value={os.pending_approval} icon={Clock}        color="bg-amber-500"/>
-            <KPI label="Approved"      value={os.approved}         icon={CheckCircle2} color="bg-blue-600"/>
-            <KPI label="Won 🎉"        value={os.won}              icon={Trophy}       color="bg-emerald-600"/>
-            <KPI label="Lost"          value={os.lost}             icon={XCircle}      color="bg-red-500"/>
-            <KPI label="Win Rate"      value={os.win_rate!=null?`${os.win_rate}%`:"—"} icon={TrendingUp} color="bg-purple-600"/>
+            <KPI label={t("dashboard.totalOpps")}    value={os.total}            icon={TrendingUp}   color="bg-slate-600"/>
+            <KPI label={t("dashboard.pending")}       value={os.pending_approval} icon={Clock}        color="bg-amber-500"/>
+            <KPI label={t("dashboard.approved")}      value={os.approved}         icon={CheckCircle2} color="bg-blue-600"/>
+            <KPI label={`${t("dashboard.won")} 🎉`}        value={os.won}              icon={Trophy}       color="bg-emerald-600"/>
+            <KPI label={t("dashboard.lost")}          value={os.lost}             icon={XCircle}      color="bg-red-500"/>
+            <KPI label={t("dashboard.winRate")}      value={os.win_rate!=null?`${os.win_rate}%`:"—"} icon={TrendingUp} color="bg-purple-600"/>
           </div>
           {os.win_rate != null && (
             <div className="mt-3 card-sm flex items-center gap-4">
-              <div className="text-sm font-medium text-gray-500">Pipeline Win Rate</div>
+              <div className="text-sm font-medium text-gray-500">{t("dashboard.pipelineWinRate")}</div>
               <div className="flex-1 progress">
                 <div className="progress-bar bg-emerald-500" style={{ width: `${os.win_rate}%` }}/>
               </div>
@@ -190,8 +192,8 @@ export default function DashboardPage() {
         <div className="card lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-semibold text-gray-900 text-sm">Monthly Bid Activity</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Bids created per month</p>
+              <h3 className="font-semibold text-gray-900 text-sm">{t("dashboard.monthlyBidActivity")}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">{t("dashboard.bidsCreatedPerMonth")}</p>
             </div>
           </div>
           {monthly.length > 0 ? (
@@ -220,8 +222,8 @@ export default function DashboardPage() {
 
         {/* Bid Type Distribution */}
         <div className="card">
-          <h3 className="font-semibold text-gray-900 text-sm mb-1">Bid Type Split</h3>
-          <p className="text-xs text-gray-400 mb-4">Distribution by type</p>
+          <h3 className="font-semibold text-gray-900 text-sm mb-1">{t("dashboard.bidTypeSplit")}</h3>
+          <p className="text-xs text-gray-400 mb-4">{t("dashboard.distributionByType")}</p>
           {typeDist.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={150}>

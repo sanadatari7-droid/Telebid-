@@ -5,9 +5,11 @@ import { authApi } from "../services/api"
 import { Eye, EyeOff, Zap, Shield, Lock, User, KeyRound, AlertCircle, Loader2, CheckCircle2 } from "lucide-react"
 import toast from "react-hot-toast"
 import clsx from "clsx"
+import { useTranslation } from "react-i18next"
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { setAuth } = useAuthStore()
   const [step, setStep] = useState("login")   // login | otp
   const [form, setForm] = useState({ username:"", password:"", otp:"" })
@@ -124,16 +126,16 @@ export default function LoginPage() {
             </div>
           </div>
           <h2 className="font-display text-4xl font-semibold text-white leading-tight mb-4">
-            Professional Bid &amp; Tender Management
+            {t("auth.heroTitle")}
           </h2>
           <p className="text-primary-200 text-base leading-relaxed">
-            A complete enterprise platform for managing the full lifecycle of bids, tenders, evaluations and contracts.
+            {t("auth.heroSubtitle")}
           </p>
           <div className="mt-10 space-y-4">
             {[
-              { icon: Shield, text: "Multi-level approval workflows" },
-              { icon: Zap,    text: "EXPRO & Government bid tracking" },
-              { icon: Lock,   text: "Role-based access control" },
+              { icon: Shield, text: t("auth.feature1") },
+              { icon: Zap,    text: t("auth.feature2") },
+              { icon: Lock,   text: t("auth.feature3") },
             ].map(({ icon: Icon, text }) => (
               <div key={text} className="flex items-center gap-3 text-primary-100">
                 <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -145,7 +147,7 @@ export default function LoginPage() {
           </div>
         </div>
         <div className="relative text-primary-300 text-xs">
-          © 2026 TeleBid Enterprise · Secure Procurement Platform
+          © 2026 TeleBid Enterprise · {t("auth.footer")}
         </div>
       </div>
 
@@ -164,8 +166,8 @@ export default function LoginPage() {
           {/* ── Step 1: Login ─────────────────────────────────────────────── */}
           {step === "login" && (
             <div>
-              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">Welcome back</h1>
-              <p className="text-gray-400 text-sm mb-8">Sign in to your account to continue</p>
+              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">{t("auth.welcomeBack")}</h1>
+              <p className="text-gray-400 text-sm mb-8">{t("auth.signInSubtitle")}</p>
 
               {error && (
                 <div className="flex items-start gap-2 p-3.5 bg-red-50 border border-red-200 rounded-xl mb-5 text-red-700 text-sm">
@@ -176,23 +178,23 @@ export default function LoginPage() {
 
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <label className="label">Username or Email</label>
+                  <label className="label">{t("auth.usernameOrEmail")}</label>
                   <div className="relative">
                     <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"/>
                     <input name="username" type="text" className="input pl-10"
-                      placeholder="Enter your username"
+                      placeholder={t("auth.usernamePlaceholder")}
                       value={form.username} onChange={fc}
                       autoFocus autoComplete="username"/>
                   </div>
                 </div>
 
                 <div>
-                  <label className="label">Password</label>
+                  <label className="label">{t("auth.password")}</label>
                   <div className="relative">
                     <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"/>
                     <input name="password" type={showPw ? "text" : "password"}
                       className="input pl-10 pr-10"
-                      placeholder="Enter your password"
+                      placeholder={t("auth.passwordPlaceholder")}
                       value={form.password} onChange={fc}
                       autoComplete="current-password"/>
                     <button type="button"
@@ -207,26 +209,26 @@ export default function LoginPage() {
                   className="btn-primary w-full justify-center py-3 text-base mt-2"
                   disabled={loading}>
                   {loading
-                    ? <><Loader2 size={16} className="animate-spin"/> Signing in…</>
-                    : "Sign in"}
+                    ? <><Loader2 size={16} className="animate-spin"/> {t("auth.signingIn")}</>
+                    : t("auth.signIn")}
                 </button>
               </form>
 
               {/* Demo credentials box */}
               <div className="mt-6 p-4 bg-primary-50 rounded-2xl border border-primary-100">
-                <div className="text-xs font-semibold text-primary-600 mb-2 uppercase tracking-wide">Default Credentials</div>
+                <div className="text-xs font-semibold text-primary-600 mb-2 uppercase tracking-wide">{t("auth.defaultCredentials")}</div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-primary-700">
-                  <div><span className="font-medium">Username:</span> admin</div>
-                  <div><span className="font-medium">Password:</span> Admin@1234</div>
+                  <div><span className="font-medium">{t("auth.usernameOrEmail")}:</span> admin</div>
+                  <div><span className="font-medium">{t("auth.password")}:</span> Admin@1234</div>
                 </div>
-                <div className="text-xs text-primary-500 mt-2">Change these immediately after first login.</div>
+                <div className="text-xs text-primary-500 mt-2">{t("auth.changeImmediately")}</div>
               </div>
 
               <p className="text-center text-xs text-gray-400 mt-5">
-                Don't have a company workspace yet?{" "}
+                {t("auth.noWorkspace")}{" "}
                 <button onClick={() => navigate("/signup")}
                   className="text-primary-600 font-medium hover:underline">
-                  Create one
+                  {t("auth.createOne")}
                 </button>
               </p>
             </div>
@@ -238,18 +240,17 @@ export default function LoginPage() {
               <div className="w-14 h-14 bg-primary-100 rounded-2xl flex items-center justify-center mb-6">
                 <KeyRound size={26} className="text-primary-600"/>
               </div>
-              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">Verify your identity</h1>
-              <p className="text-gray-400 text-sm mb-6">Enter the 6-digit verification code</p>
+              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">{t("auth.verifyIdentity")}</h1>
+              <p className="text-gray-400 text-sm mb-6">{t("auth.verifySubtitle")}</p>
 
               {/* Demo OTP notice */}
               {demoOtp && (
                 <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl mb-5">
                   <Shield size={16} className="text-amber-600 flex-shrink-0 mt-0.5"/>
                   <div>
-                    <div className="text-sm font-semibold text-amber-800">Demo Mode</div>
+                    <div className="text-sm font-semibold text-amber-800">{t("auth.demoMode")}</div>
                     <div className="text-xs text-amber-700 mt-0.5">
-                      SMTP is not configured — your OTP is shown below and auto-filled.
-                      Configure SMTP in System Settings to send real emails.
+                      {t("auth.demoModeNote")}
                     </div>
                     <div className="font-mono text-2xl font-bold mt-2 tracking-[0.4em] text-amber-800">
                       {demoOtp}

@@ -328,9 +328,46 @@
 .dark .border-purple-100, .dark .border-purple-200 { border-color: rgba(147,51,234,0.4); }
 .dark .text-purple-600, .dark .text-purple-700 { color: #d8b4fe; }
 
-/* ── RTL Support ──────────────────────────────────────────────────── */
+/* ── RTL Support ──────────────────────────────────────────────────────
+   Flexbox children reverse automatically once `dir="rtl"` is set on
+   <html> (the browser flips the main axis on its own for `flex-row`),
+   which covers most of this app's layouts with no per-component change.
+   What's left is (a) an Arabic-capable font, since neither Fraunces nor
+   Public Sans carry Arabic glyphs, and (b) undoing *physical* left/right
+   values — margin/padding/position — that Tailwind's non-logical
+   utilities hardcode and that `dir` alone can't flip. This block covers
+   the utility values actually used in this codebase; a value added
+   later that isn't in this list will simply stay LTR-positioned until
+   added here. ─────────────────────────────────────────────────────── */
+[dir="rtl"] body,
+[dir="rtl"] .font-display {
+  font-family: "Noto Sans Arabic", "Public Sans", system-ui, sans-serif;
+}
 [dir="rtl"] .btn { flex-direction: row-reverse; }
 [dir="rtl"] .tbl th, [dir="rtl"] .tbl td { text-align: right; }
+[dir="rtl"] .text-left { text-align: right; }
+[dir="rtl"] .text-right { text-align: left; }
+
+[dir="rtl"] .ml-1 { margin-left:0; margin-right:.25rem; } [dir="rtl"] .mr-1 { margin-right:0; margin-left:.25rem; }
+[dir="rtl"] .ml-1\.5 { margin-left:0; margin-right:.375rem; } [dir="rtl"] .mr-1\.5 { margin-right:0; margin-left:.375rem; }
+[dir="rtl"] .ml-2 { margin-left:0; margin-right:.5rem; } [dir="rtl"] .mr-2 { margin-right:0; margin-left:.5rem; }
+[dir="rtl"] .ml-2\.5 { margin-left:0; margin-right:.625rem; } [dir="rtl"] .mr-2\.5 { margin-right:0; margin-left:.625rem; }
+[dir="rtl"] .ml-3 { margin-left:0; margin-right:.75rem; } [dir="rtl"] .mr-3 { margin-right:0; margin-left:.75rem; }
+[dir="rtl"] .ml-4 { margin-left:0; margin-right:1rem; } [dir="rtl"] .mr-4 { margin-right:0; margin-left:1rem; }
+[dir="rtl"] .ml-auto { margin-left:0; margin-right:auto; } [dir="rtl"] .mr-auto { margin-right:0; margin-left:auto; }
+
+[dir="rtl"] .pl-2 { padding-left:0; padding-right:.5rem; } [dir="rtl"] .pr-2 { padding-right:0; padding-left:.5rem; }
+[dir="rtl"] .pl-3 { padding-left:0; padding-right:.75rem; } [dir="rtl"] .pr-3 { padding-right:0; padding-left:.75rem; }
+[dir="rtl"] .pl-3\.5 { padding-left:0; padding-right:.875rem; } [dir="rtl"] .pr-3\.5 { padding-right:0; padding-left:.875rem; }
+[dir="rtl"] .pl-4 { padding-left:0; padding-right:1rem; } [dir="rtl"] .pr-4 { padding-right:0; padding-left:1rem; }
+[dir="rtl"] .pl-10 { padding-left:0; padding-right:2.5rem; } [dir="rtl"] .pr-10 { padding-right:0; padding-left:2.5rem; }
+
+[dir="rtl"] .left-0 { left:auto; right:0; } [dir="rtl"] .right-0 { right:auto; left:0; }
+[dir="rtl"] .left-3 { left:auto; right:.75rem; } [dir="rtl"] .right-3 { right:auto; left:.75rem; }
+[dir="rtl"] .left-3\.5 { left:auto; right:.875rem; } [dir="rtl"] .right-3\.5 { right:auto; left:.875rem; }
+
+[dir="rtl"] .border-l { border-left:0; border-right-width:1px; } [dir="rtl"] .border-r { border-right:0; border-left-width:1px; }
+[dir="rtl"] .rounded-l-xl { border-radius:0 .75rem .75rem 0; } [dir="rtl"] .rounded-r-xl { border-radius:.75rem 0 0 .75rem; }
 
 /* ── Animations ───────────────────────────────────────────────────── */
 @keyframes slideUp {

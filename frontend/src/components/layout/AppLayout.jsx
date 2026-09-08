@@ -11,12 +11,14 @@ import {
   ChevronRight, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark, Sparkles, BookOpen as LibraryIcon
 } from "lucide-react"
 import clsx from "clsx"
+import { useTranslation } from "react-i18next"
+import { setAppLanguage } from "../../i18n"
 
 const NAV_SECTIONS = [
   {
     section: null,
     items: [
-      { label: "Dashboard",  path: "/dashboard",  icon: LayoutDashboard, badge: null },
+      { label: "Dashboard", tKey: "nav.dashboard", path: "/dashboard",  icon: LayoutDashboard, badge: null },
     ]
   },
   {
@@ -25,55 +27,55 @@ const NAV_SECTIONS = [
     // deliberately not listed here anymore: RFP & Bids is its full
     // replacement, and having both confused first-time users into not
     // knowing which one to use. The route itself still exists, unlinked.
-    section: "Pipeline",
+    section: "Pipeline", sectionTKey: "nav.sectionPipeline",
     items: [
-      { label: "RFP & Bids",         path: "/rfp-bids",     icon: Briefcase },
-      { label: "All Bids",            path: "/bids",         icon: FileText },
-      { label: "EXPRO / Gov",         path: "/expro",        icon: Antenna },
-      { label: "ICT Projects",        path: "/ict",          icon: Monitor },
-      { label: "Bonds",               path: "/bonds",        icon: Landmark },
-      { label: "Won Records",        path: "/won-records",  icon: Trophy },
-      { label: "Lost Records",       path: "/lost-records", icon: XCircle },
+      { label: "RFP & Bids",   tKey: "nav.rfpBids",     path: "/rfp-bids",     icon: Briefcase },
+      { label: "All Bids",     tKey: "nav.allBids",     path: "/bids",         icon: FileText },
+      { label: "EXPRO / Gov",  tKey: "nav.expro",       path: "/expro",        icon: Antenna },
+      { label: "ICT Projects", tKey: "nav.ict",         path: "/ict",          icon: Monitor },
+      { label: "Bonds",        tKey: "nav.bonds",       path: "/bonds",        icon: Landmark },
+      { label: "Won Records",  tKey: "nav.wonRecords",  path: "/won-records",  icon: Trophy },
+      { label: "Lost Records", tKey: "nav.lostRecords", path: "/lost-records", icon: XCircle },
     ]
   },
   {
-    section: "AI Tools",
+    section: "AI Tools", sectionTKey: "nav.sectionAiTools",
     items: [
-      { label: "AI Alerts",           path: "/ai-alerts",    icon: Sparkles },
-      { label: "Content Library",     path: "/content-library", icon: LibraryIcon },
+      { label: "AI Alerts",       tKey: "nav.aiAlerts",       path: "/ai-alerts",       icon: Sparkles },
+      { label: "Content Library", tKey: "nav.contentLibrary", path: "/content-library", icon: LibraryIcon },
     ]
   },
   {
-    section: "Evaluation",
+    section: "Evaluation", sectionTKey: "nav.sectionEvaluation",
     items: [
-      { label: "Evaluations",   path: "/evaluations", icon: ClipboardCheck },
-      { label: "Approvals",     path: "/approvals",   icon: Shield },
+      { label: "Evaluations", tKey: "nav.evaluations", path: "/evaluations", icon: ClipboardCheck },
+      { label: "Approvals",   tKey: "nav.approvals",   path: "/approvals",   icon: Shield },
     ]
   },
   {
-    section: "Operations",
+    section: "Operations", sectionTKey: "nav.sectionOperations",
     items: [
-      { label: "Contracts",   path: "/contracts",  icon: BookOpen },
-      { label: "Vendors",     path: "/vendors",    icon: Building2 },
-      { label: "Calendar",    path: "/calendar",   icon: Calendar },
+      { label: "Contracts", tKey: "nav.contracts", path: "/contracts", icon: BookOpen },
+      { label: "Vendors",   tKey: "nav.vendors",   path: "/vendors",   icon: Building2 },
+      { label: "Calendar",  tKey: "nav.calendar",  path: "/calendar",  icon: Calendar },
     ]
   },
   {
-    section: "Reports",
+    section: "Reports", sectionTKey: "nav.sectionReports",
     items: [
-      { label: "Reports",     path: "/reports",    icon: BarChart3 },
-      { label: "Bid Logs",    path: "/bid-logs",   icon: History },
-      { label: "Audit Log",   path: "/audit-log",  icon: Shield },
+      { label: "Reports",   tKey: "nav.reports",  path: "/reports",   icon: BarChart3 },
+      { label: "Bid Logs",  tKey: "nav.bidLogs",  path: "/bid-logs",  icon: History },
+      { label: "Audit Log", tKey: "nav.auditLog", path: "/audit-log", icon: Shield },
     ]
   },
   {
-    section: "Admin",
+    section: "Admin", sectionTKey: "nav.sectionAdmin",
     items: [
-      { label: "Company Settings",path: "/company-settings",icon: Building2 },
-      { label: "System Settings", path: "/system-settings", icon: Settings },
-      { label: "Users",           path: "/users",            icon: Users },
-      { label: "Employees",       path: "/employees",        icon: Users },
-      { label: "Invitations",     path: "/invitations",      icon: Bell },
+      { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2 },
+      { label: "System Settings",  tKey: "nav.systemSettings",  path: "/system-settings",  icon: Settings },
+      { label: "Users",            tKey: "nav.users",           path: "/users",            icon: Users },
+      { label: "Employees",        tKey: "nav.employees",       path: "/employees",        icon: Users },
+      { label: "Invitations",      tKey: "nav.invitations",     path: "/invitations",      icon: Bell },
     ]
   },
 ]
@@ -172,6 +174,7 @@ export default function AppLayout() {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
+  const { t, i18n } = useTranslation()
   const [collapsed, setCollapsed] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -221,7 +224,7 @@ export default function AppLayout() {
           <button onClick={() => setShowSearch(true)}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-gray-400 hover:bg-gray-100 transition-colors text-xs">
             <Search size={13}/>
-            <span className="flex-1 text-left">Search…</span>
+            <span className="flex-1 text-left">{t("nav.searchPlaceholder")}</span>
             <div className="flex items-center gap-0.5">
               <kbd className="bg-white px-1 rounded text-gray-300 border border-gray-200 text-[10px]">⌘</kbd>
               <kbd className="bg-white px-1 rounded text-gray-300 border border-gray-200 text-[10px]">K</kbd>
@@ -237,7 +240,7 @@ export default function AppLayout() {
             {section.section && !collapsed && (
               <div className="px-3 mb-1">
                 <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-widest">
-                  {section.section}
+                  {section.sectionTKey ? t(section.sectionTKey) : section.section}
                 </span>
               </div>
             )}
@@ -245,15 +248,16 @@ export default function AppLayout() {
               const isActive = location.pathname === item.path ||
                 (item.path !== "/" && location.pathname.startsWith(item.path))
               const Icon = item.icon
+              const label = item.tKey ? t(item.tKey) : item.label
               return (
-                <NavLink key={item.path} to={item.path} title={collapsed ? item.label : undefined}
+                <NavLink key={item.path} to={item.path} title={collapsed ? label : undefined}
                   className={clsx(
                     "nav-item group",
                     isActive ? "nav-item-active" : "nav-item-inactive",
                     collapsed && "justify-center px-2"
                   )}>
                   <Icon size={16} className="flex-shrink-0"/>
-                  {!collapsed && <span className="truncate">{item.label}</span>}
+                  {!collapsed && <span className="truncate">{label}</span>}
                   {!collapsed && item.badge != null && item.badge > 0 && (
                     <span className="ml-auto bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
                       {item.badge > 9 ? "9+" : item.badge}
@@ -353,6 +357,11 @@ export default function AppLayout() {
                   {unread > 9 ? "9+" : unread}
                 </span>
               )}
+            </button>
+            <button onClick={() => setAppLanguage(i18n.language === "ar" ? "en" : "ar")}
+              title={i18n.language === "ar" ? "English" : "العربية"}
+              className="btn-icon text-gray-400 hover:text-gray-600 text-xs font-semibold w-8">
+              {i18n.language === "ar" ? "EN" : "AR"}
             </button>
             <button onClick={() => navigate("/system-settings")}
               className="btn-icon text-gray-400 hover:text-gray-600">

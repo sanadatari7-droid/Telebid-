@@ -6,6 +6,7 @@ import { fmt } from "../utils/fmt"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import { Plus, Check, X, AlertTriangle, Clock, Shield, FileText, Trash2, Eye } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 const BOND_TYPES = [
   { value:"NEW_BOND",   label:"New Bond",   color:"bg-blue-100 text-blue-700" },
@@ -186,6 +187,7 @@ function BondModal({ bond, onClose }) {
 }
 
 export default function BondsPage() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [showCreate, setShowCreate] = useState(false)
@@ -218,22 +220,22 @@ export default function BondsPage() {
   })
 
   const KPI = [
-    { label:"Total Bonds",    val:stats?.total||0,         color:"bg-blue-600" },
-    { label:"New Bonds",      val:stats?.new_bonds||0,     color:"bg-blue-500" },
-    { label:"Bid Bonds",      val:stats?.bid_bonds||0,     color:"bg-amber-500" },
-    { label:"Final Bonds",    val:stats?.final_bonds||0,   color:"bg-green-600" },
-    { label:"Pending",        val:stats?.pending||0,       color:"bg-yellow-500" },
-    { label:"Expiring Soon",  val:stats?.expiring_soon||0, color:"bg-red-500" },
+    { label:t("bonds.totalBonds"),    val:stats?.total||0,         color:"bg-blue-600" },
+    { label:t("bonds.newBonds"),      val:stats?.new_bonds||0,     color:"bg-blue-500" },
+    { label:t("bonds.bidBonds"),      val:stats?.bid_bonds||0,     color:"bg-amber-500" },
+    { label:t("bonds.finalBonds"),    val:stats?.final_bonds||0,   color:"bg-green-600" },
+    { label:t("bonds.pending"),        val:stats?.pending||0,       color:"bg-yellow-500" },
+    { label:t("bonds.expiringSoon"),  val:stats?.expiring_soon||0, color:"bg-red-500" },
   ]
 
   return (
     <div className="p-6 max-w-screen-xl mx-auto space-y-5">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Bonds</h1>
-          <p className="page-subtitle">New Bonds → Bid Bonds → Final Bonds</p>
+          <h1 className="page-title">{t("bonds.pageTitle")}</h1>
+          <p className="page-subtitle">{t("bonds.breadcrumb")}</p>
         </div>
-        <button className="btn-primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New Bond</button>
+        <button className="btn-primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> {t("bonds.newBond")}</button>
       </div>
 
       {/* KPIs */}
@@ -250,11 +252,11 @@ export default function BondsPage() {
       <div className="card-sm py-3">
         <div className="flex gap-3 flex-wrap">
           <select className="input w-auto py-2" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
-            <option value="">All Types</option>
-            {BOND_TYPES.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
+            <option value="">{t("bonds.allTypes")}</option>
+            {BOND_TYPES.map(bt=><option key={bt.value} value={bt.value}>{bt.label}</option>)}
           </select>
           <select className="input w-auto py-2" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
-            <option value="">All Statuses</option>
+            <option value="">{t("bonds.allStatuses")}</option>
             {["PENDING","ISSUED","EXPIRED","CANCELLED","RELEASED"].map(s=><option key={s} value={s}>{s}</option>)}
           </select>
         </div>
@@ -266,15 +268,15 @@ export default function BondsPage() {
           <table className="tbl">
             <thead>
               <tr>
-                <th>Bond Type</th>
-                <th>Opportunity</th>
-                <th>Bond #</th>
-                <th>Amount</th>
-                <th>Issuer Bank</th>
-                <th>Issue Date</th>
-                <th>Expiry</th>
-                <th>Days Left</th>
-                <th>Status</th>
+                <th>{t("bonds.colBondType")}</th>
+                <th>{t("bonds.colOpportunity")}</th>
+                <th>{t("bonds.colBondNumber")}</th>
+                <th>{t("bonds.colAmount")}</th>
+                <th>{t("bonds.colIssuerBank")}</th>
+                <th>{t("bonds.colIssueDate")}</th>
+                <th>{t("bonds.colExpiry")}</th>
+                <th>{t("bonds.colDaysLeft")}</th>
+                <th>{t("bonds.colStatus")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -283,7 +285,7 @@ export default function BondsPage() {
                 <tr><td colSpan={10} className="text-center py-10"><div className="animate-spin inline-block w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full"/></td></tr>
               ) : bonds.length===0 ? (
                 <tr><td colSpan={10} className="py-12">
-                  <div className="empty-state"><div className="empty-icon mx-auto"><Shield size={28}/></div><p className="text-sm text-gray-400">No bonds found</p></div>
+                  <div className="empty-state"><div className="empty-icon mx-auto"><Shield size={28}/></div><p className="text-sm text-gray-400">{t("bonds.noBondsFound")}</p></div>
                 </td></tr>
               ) : bonds.map(b => {
                 const typeInfo = BOND_TYPES.find(t=>t.value===b.bond_type)
