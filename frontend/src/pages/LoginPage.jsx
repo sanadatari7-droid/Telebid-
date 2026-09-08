@@ -108,9 +108,9 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex bg-slate-50">
       {/* ── Left branding panel ─────────────────────────────────────────── */}
-      <div className="hidden lg:flex lg:w-[45%] bg-blue-600 flex-col justify-between p-12 relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-[45%] bg-primary-600 flex-col justify-between p-12 relative overflow-hidden">
         <div className="absolute inset-0">
-          <div className="absolute top-[-10%] right-[-10%] w-80 h-80 bg-blue-500/30 rounded-full blur-3xl"/>
+          <div className="absolute top-[-10%] right-[-10%] w-80 h-80 bg-primary-500/30 rounded-full blur-3xl"/>
           <div className="absolute bottom-[-10%] left-[-10%] w-96 h-96 bg-indigo-700/30 rounded-full blur-3xl"/>
         </div>
         <div className="relative">
@@ -120,13 +120,13 @@ export default function LoginPage() {
             </div>
             <div>
               <div className="text-white font-bold text-lg">TeleBid</div>
-              <div className="text-blue-200 text-xs font-medium tracking-widest">ENTERPRISE</div>
+              <div className="text-primary-200 text-xs font-medium tracking-widest">ENTERPRISE</div>
             </div>
           </div>
-          <h2 className="text-4xl font-bold text-white leading-tight mb-4">
+          <h2 className="font-display text-4xl font-semibold text-white leading-tight mb-4">
             Professional Bid &amp; Tender Management
           </h2>
-          <p className="text-blue-200 text-base leading-relaxed">
+          <p className="text-primary-200 text-base leading-relaxed">
             A complete enterprise platform for managing the full lifecycle of bids, tenders, evaluations and contracts.
           </p>
           <div className="mt-10 space-y-4">
@@ -135,7 +135,7 @@ export default function LoginPage() {
               { icon: Zap,    text: "EXPRO & Government bid tracking" },
               { icon: Lock,   text: "Role-based access control" },
             ].map(({ icon: Icon, text }) => (
-              <div key={text} className="flex items-center gap-3 text-blue-100">
+              <div key={text} className="flex items-center gap-3 text-primary-100">
                 <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center flex-shrink-0">
                   <Icon size={14} className="text-white"/>
                 </div>
@@ -144,7 +144,7 @@ export default function LoginPage() {
             ))}
           </div>
         </div>
-        <div className="relative text-blue-300 text-xs">
+        <div className="relative text-primary-300 text-xs">
           © 2026 TeleBid Enterprise · Secure Procurement Platform
         </div>
       </div>
@@ -155,7 +155,7 @@ export default function LoginPage() {
 
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
+            <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center">
               <Zap size={18} className="text-white"/>
             </div>
             <div className="font-bold text-gray-900">TeleBid Enterprise</div>
@@ -164,7 +164,7 @@ export default function LoginPage() {
           {/* ── Step 1: Login ─────────────────────────────────────────────── */}
           {step === "login" && (
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-1">Welcome back</h1>
+              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">Welcome back</h1>
               <p className="text-gray-400 text-sm mb-8">Sign in to your account to continue</p>
 
               {error && (
@@ -213,19 +213,19 @@ export default function LoginPage() {
               </form>
 
               {/* Demo credentials box */}
-              <div className="mt-6 p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                <div className="text-xs font-semibold text-blue-600 mb-2 uppercase tracking-wide">Default Credentials</div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-blue-700">
+              <div className="mt-6 p-4 bg-primary-50 rounded-2xl border border-primary-100">
+                <div className="text-xs font-semibold text-primary-600 mb-2 uppercase tracking-wide">Default Credentials</div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-primary-700">
                   <div><span className="font-medium">Username:</span> admin</div>
                   <div><span className="font-medium">Password:</span> Admin@1234</div>
                 </div>
-                <div className="text-xs text-blue-500 mt-2">Change these immediately after first login.</div>
+                <div className="text-xs text-primary-500 mt-2">Change these immediately after first login.</div>
               </div>
 
               <p className="text-center text-xs text-gray-400 mt-5">
                 Don't have a company workspace yet?{" "}
                 <button onClick={() => navigate("/signup")}
-                  className="text-blue-600 font-medium hover:underline">
+                  className="text-primary-600 font-medium hover:underline">
                   Create one
                 </button>
               </p>
@@ -235,10 +235,10 @@ export default function LoginPage() {
           {/* ── Step 2: OTP ───────────────────────────────────────────────── */}
           {step === "otp" && (
             <div>
-              <div className="w-14 h-14 bg-blue-100 rounded-2xl flex items-center justify-center mb-6">
-                <KeyRound size={26} className="text-blue-600"/>
+              <div className="w-14 h-14 bg-primary-100 rounded-2xl flex items-center justify-center mb-6">
+                <KeyRound size={26} className="text-primary-600"/>
               </div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-1">Verify your identity</h1>
+              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">Verify your identity</h1>
               <p className="text-gray-400 text-sm mb-6">Enter the 6-digit verification code</p>
 
               {/* Demo OTP notice */}

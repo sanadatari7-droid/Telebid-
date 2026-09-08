@@ -26,7 +26,7 @@
            disabled:opacity-50 disabled:cursor-not-allowed select-none;
   }
   .btn-primary {
-    @apply btn bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500
+    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500
            shadow-sm hover:shadow-md active:scale-[0.98];
   }
   .btn-secondary {
@@ -51,12 +51,12 @@
 
   /* ── Cards ────────────────────────────────────────────────────── */
   .card {
-    @apply bg-white rounded-2xl border border-gray-100 shadow-sm p-6
+    @apply bg-white rounded-2xl border border-gray-100 shadow-card p-6
            transition-shadow duration-200;
   }
   .card-sm { @apply card p-4; }
-  .card-hover { @apply card hover:shadow-md hover:border-gray-200 cursor-pointer; }
-  .card-elevated { @apply card shadow-md border-0; }
+  .card-hover { @apply card hover:shadow-card-hover hover:border-gray-200 cursor-pointer; }
+  .card-elevated { @apply card shadow-card-hover border-0; }
 
   /* ── Form Controls ────────────────────────────────────────────── */
   .input {
@@ -112,7 +112,7 @@
     @apply px-4 py-3.5 border-b border-gray-50 text-gray-700;
   }
   .tbl tbody tr {
-    @apply hover:bg-blue-50/30 transition-colors duration-100 cursor-default;
+    @apply hover:bg-primary-50/40 transition-colors duration-100 cursor-default;
   }
   .tbl tbody tr:last-child td { @apply border-0; }
 
@@ -134,7 +134,7 @@
     @apply flex items-start justify-between flex-wrap gap-4 mb-6;
   }
   .page-title {
-    @apply text-2xl font-bold text-gray-900 tracking-tight;
+    @apply font-display text-2xl font-semibold text-gray-900 tracking-tight;
   }
   .page-subtitle {
     @apply text-sm text-gray-400 mt-0.5;
@@ -184,7 +184,7 @@
            transition-all duration-150 cursor-pointer select-none;
   }
   .nav-item-active {
-    @apply bg-blue-600 text-white shadow-sm;
+    @apply bg-primary-600 text-white shadow-sm;
   }
   .nav-item-inactive {
     @apply text-gray-500 hover:bg-gray-100 hover:text-gray-900;
@@ -194,7 +194,7 @@
            transition-all duration-150 cursor-pointer;
   }
   .nav-child-active {
-    @apply bg-blue-600 text-white;
+    @apply bg-primary-600 text-white;
   }
   .nav-child-inactive {
     @apply text-gray-400 hover:bg-gray-100 hover:text-gray-700;

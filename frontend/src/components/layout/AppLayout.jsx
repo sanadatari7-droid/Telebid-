@@ -119,7 +119,7 @@ function QuickSearch({ onClose }) {
           <input ref={ref} className="flex-1 text-sm outline-none placeholder-gray-400 text-gray-900"
             placeholder="Search bids, vendors, contracts, opportunities…"
             value={q} onChange={e => setQ(e.target.value)}/>
-          {loading && <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"/>}
+          {loading && <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"/>}
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={16}/></button>
         </div>
         {results && (
@@ -204,12 +204,12 @@ export default function AppLayout() {
     <>
       {/* Logo */}
       <div className={clsx("flex items-center gap-3 px-4 py-5 flex-shrink-0", collapsed && "justify-center")}>
-        <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
+        <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
           <Zap size={18} className="text-white"/>
         </div>
         {!collapsed && (
           <div>
-            <div className="font-bold text-gray-900 text-sm leading-tight">TeleBid</div>
+            <div className="font-display font-semibold text-gray-900 text-sm leading-tight">TeleBid</div>
             <div className="text-[10px] text-gray-400 font-medium tracking-wide">ENTERPRISE</div>
           </div>
         )}
@@ -275,7 +275,7 @@ export default function AppLayout() {
           </button>
         ) : (
           <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 group transition-colors">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-primary-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
               {user?.full_name?.charAt(0) || "U"}
             </div>
             <div className="flex-1 min-w-0">
@@ -359,7 +359,7 @@ export default function AppLayout() {
               <Settings size={16}/>
             </button>
             <div className="w-px h-5 bg-gray-100 mx-1"/>
-            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:bg-blue-700 transition-colors"
+            <div className="w-8 h-8 rounded-xl bg-primary-600 flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:bg-primary-700 transition-colors"
               onClick={() => navigate("/users")}>
               {user?.full_name?.charAt(0) || "U"}
             </div>

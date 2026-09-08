@@ -5,28 +5,29 @@ export default {
     extend: {
       colors: {
         primary: {
-           50: "#eff6ff",
-          100: "#dbeafe",
-          200: "#bfdbfe",
-          300: "#93c5fd",
-          400: "#60a5fa",
-          500: "#3b82f6",
-          600: "#2563eb",
-          700: "#1d4ed8",
-          800: "#1e40af",
-          900: "#1e3a8a",
+           50: "#eef2f7",
+          100: "#dce4ee",
+          200: "#b3c3d6",
+          300: "#7f9cbb",
+          400: "#4d729d",
+          500: "#2c5480",
+          600: "#1e3a5f",
+          700: "#17304f",
+          800: "#0f2540",
+          900: "#0a1a30",
         },
         gold: {
-          400: "#fbbf24",
-          500: "#f59e0b",
-          600: "#d97706",
+          400: "#d1a24f",
+          500: "#a5760e",
+          600: "#8a610b",
         },
         slate: {
           50: "#f8fafc",
         }
       },
       fontFamily: {
-        sans: ["Inter","system-ui","-apple-system","sans-serif"],
+        sans: ["Public Sans","system-ui","-apple-system","sans-serif"],
+        display: ["Fraunces","Georgia","serif"],
         mono: ["JetBrains Mono","Fira Code","monospace"],
       },
       borderRadius: {
