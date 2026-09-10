@@ -87,6 +87,10 @@
   "dashboard": {
     "title": "Dashboard",
     "subtitle": "Procurement & bid management overview",
+    "greetingMorning": "Good morning",
+    "greetingAfternoon": "Good afternoon",
+    "greetingEvening": "Good evening",
+    "greetingSubtitle": "Here's what's moving across your pipeline today.",
     "newOpportunity": "New Opportunity",
     "newBid": "New Bid",
     "quickActions": "Quick Actions",

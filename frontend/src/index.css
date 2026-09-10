@@ -55,7 +55,7 @@
            transition-shadow duration-200;
   }
   .card-sm { @apply card p-4; }
-  .card-hover { @apply card hover:shadow-card-hover hover:border-gray-200 cursor-pointer; }
+  .card-hover { @apply card hover:shadow-card-hover hover:border-gray-200 hover:-translate-y-0.5 cursor-pointer transition-all duration-200; }
   .card-elevated { @apply card shadow-card-hover border-0; }
 
   /* ── Form Controls ────────────────────────────────────────────── */
@@ -142,12 +142,15 @@
 
   /* ── KPI Cards ────────────────────────────────────────────────── */
   .kpi-card {
-    @apply card-sm flex items-center gap-4;
+    @apply card-sm flex items-center gap-4 transition-all duration-200
+           hover:-translate-y-0.5 hover:shadow-card-hover;
   }
   .kpi-icon {
-    @apply w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0;
+    @apply w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0
+           shadow-md transition-transform duration-200 group-hover:scale-110;
+    background-image: linear-gradient(135deg, rgba(255,255,255,.32), rgba(255,255,255,0) 60%);
   }
-  .kpi-value { @apply text-2xl font-bold text-gray-900; }
+  .kpi-value { @apply font-display text-2xl font-semibold text-gray-900; }
   .kpi-label { @apply text-xs font-medium text-gray-400 uppercase tracking-wide mt-0.5; }
 
   /* ── Timeline ─────────────────────────────────────────────────── */

@@ -87,6 +87,10 @@
   "dashboard": {
     "title": "لوحة التحكم",
     "subtitle": "نظرة عامة على إدارة المشتريات والمناقصات",
+    "greetingMorning": "صباح الخير",
+    "greetingAfternoon": "مساء الخير",
+    "greetingEvening": "مساء الخير",
+    "greetingSubtitle": "إليك آخر مستجدات مسار أعمالك اليوم.",
     "newOpportunity": "فرصة جديدة",
     "newBid": "مناقصة جديدة",
     "quickActions": "إجراءات سريعة",

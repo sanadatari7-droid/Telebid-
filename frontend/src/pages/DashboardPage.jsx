@@ -4,13 +4,22 @@ import { bidsApi, oppsV2Api, notifApi, bondsApi } from "../services/api"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
          PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from "recharts"
 import { FileText, CheckCircle2, Clock, DollarSign, XCircle, AlertCircle,
-         Trophy, TrendingUp, TrendingDown, Building2, Zap, Calendar, Bell, ArrowRight, BarChart3 } from "lucide-react"
+         Trophy, TrendingUp, TrendingDown, Building2, Zap, Calendar, Bell, ArrowRight, BarChart3,
+         Settings, Antenna, PartyPopper, ThumbsDown, PlusCircle, Landmark, ShieldCheck } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { fmt } from "../utils/fmt"
 import clsx from "clsx"
 import { useTranslation } from "react-i18next"
+import { useAuthStore } from "../store/authStore"
 
 const PALETTE = ["#3b82f6","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#ec4899"]
+
+function greetingKey() {
+  const h = new Date().getHours()
+  if (h < 12) return "morning"
+  if (h < 18) return "afternoon"
+  return "evening"
+}
 
 function KPI({ label, value, sub, icon: Icon, color, trend, onClick }) {
   return (
@@ -65,6 +74,8 @@ function DeadlineCard({ opp }) {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
+  const { user } = useAuthStore()
+  const firstName = user?.full_name?.split(" ")[0] || user?.username || ""
 
   const { data: bidsData, isLoading: bidsLoading } = useQuery({
     queryKey: ["dashboard"],
@@ -98,51 +109,57 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-screen-2xl mx-auto">
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{t("dashboard.title")}</h1>
-          <p className="page-subtitle">{t("dashboard.subtitle")}</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn-secondary btn-sm" onClick={() => navigate("/rfp-bids")}>
-            <FileText size={13}/> {t("dashboard.newOpportunity")}
-          </button>
-          <button className="btn-primary btn-sm" onClick={() => navigate("/bids")}>
-            <Zap size={13}/> {t("dashboard.newBid")}
-          </button>
+      {/* Hero greeting */}
+      <div className="relative overflow-hidden rounded-3xl bg-primary-800 px-6 py-7 sm:px-8 sm:py-8 shadow-card-hover animate-fade-in">
+        <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-3xl pointer-events-none"/>
+        <div className="absolute -bottom-20 -left-10 w-72 h-72 rounded-full bg-gold-400/20 blur-3xl pointer-events-none"/>
+        <div className="relative flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="font-display text-2xl sm:text-3xl font-semibold text-white">
+              {t(`dashboard.greeting${greetingKey().charAt(0).toUpperCase()}${greetingKey().slice(1)}`)}{firstName ? `, ${firstName}` : ""}
+            </div>
+            <p className="text-primary-200 text-sm mt-1.5">{t("dashboard.greetingSubtitle")}</p>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-secondary btn-sm bg-white/95 hover:bg-white border-0" onClick={() => navigate("/rfp-bids")}>
+              <FileText size={13}/> {t("dashboard.newOpportunity")}
+            </button>
+            <button className="btn btn-sm bg-gold-500 text-white hover:bg-gold-600 shadow-sm hover:shadow-md active:scale-[0.98]" onClick={() => navigate("/bids")}>
+              <Zap size={13}/> {t("dashboard.newBid")}
+            </button>
+          </div>
         </div>
       </div>
-
 
       {/* ── Quick Action Buttons (from dashboard sketch) ─────────────────── */}
       <div className="card-sm">
         <div className="section-title mb-3">{t("dashboard.quickActions")}</div>
         <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2">
           {[
-            { label:t("dashboard.companySettings"),  path:"/company-settings", color:"bg-gray-700" },
-            { label:t("dashboard.newExproRequest"), path:"/rfp-bids?new=expro", color:"bg-blue-600" },
-            { label:t("dashboard.wonExpro"),         path:"/rfp-bids?status=WON&type=EXPRO", color:"bg-emerald-600" },
-            { label:t("dashboard.lostExpro"),        path:"/rfp-bids?status=LOST&type=EXPRO", color:"bg-red-600" },
-            { label:t("dashboard.newRfp"),           path:"/rfp-bids?new=rfp", color:"bg-indigo-600" },
-            { label:t("dashboard.wonRfps"),          path:"/rfp-bids?status=WON", color:"bg-green-600" },
-            { label:t("dashboard.lostRfps"),         path:"/rfp-bids?status=LOST", color:"bg-red-500" },
-            { label:t("dashboard.newBond"),          path:"/bonds?new=true", color:"bg-amber-600" },
+            { label:t("dashboard.companySettings"),  path:"/company-settings", color:"bg-gray-700", icon:Settings },
+            { label:t("dashboard.newExproRequest"), path:"/rfp-bids?new=expro", color:"bg-blue-600", icon:Antenna },
+            { label:t("dashboard.wonExpro"),         path:"/rfp-bids?status=WON&type=EXPRO", color:"bg-emerald-600", icon:PartyPopper },
+            { label:t("dashboard.lostExpro"),        path:"/rfp-bids?status=LOST&type=EXPRO", color:"bg-red-600", icon:ThumbsDown },
+            { label:t("dashboard.newRfp"),           path:"/rfp-bids?new=rfp", color:"bg-indigo-600", icon:PlusCircle },
+            { label:t("dashboard.wonRfps"),          path:"/rfp-bids?status=WON", color:"bg-green-600", icon:Trophy },
+            { label:t("dashboard.lostRfps"),         path:"/rfp-bids?status=LOST", color:"bg-red-500", icon:XCircle },
+            { label:t("dashboard.newBond"),          path:"/bonds?new=true", color:"bg-amber-600", icon:Landmark },
           ].map(btn => (
             <button key={btn.label} onClick={()=>navigate(btn.path)}
-              className={clsx("flex flex-col items-center justify-center p-3 rounded-xl text-white text-xs font-semibold text-center leading-tight transition-all hover:opacity-90 hover:scale-105 active:scale-95 shadow-sm",btn.color)}>
+              className={clsx("flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl text-white text-xs font-semibold text-center leading-tight transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:scale-95 shadow-sm",btn.color)}>
+              <btn.icon size={18} className="opacity-90"/>
               {btn.label}
             </button>
           ))}
         </div>
         <div className="mt-2 flex gap-2">
           <button onClick={()=>navigate("/bonds?type=BID_BOND")}
-            className="flex-1 py-2 px-3 rounded-xl bg-amber-500 text-white text-xs font-semibold text-center hover:bg-amber-600 transition-all">
-            {t("dashboard.bidBond")}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-amber-500 text-white text-xs font-semibold text-center hover:bg-amber-600 hover:-translate-y-0.5 transition-all duration-200 shadow-sm hover:shadow-lg">
+            <ShieldCheck size={15}/> {t("dashboard.bidBond")}
           </button>
           <button onClick={()=>navigate("/bonds?type=FINAL_BOND")}
-            className="flex-1 py-2 px-3 rounded-xl bg-amber-700 text-white text-xs font-semibold text-center hover:bg-amber-800 transition-all">
-            {t("dashboard.finalBond")}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-amber-700 text-white text-xs font-semibold text-center hover:bg-amber-800 hover:-translate-y-0.5 transition-all duration-200 shadow-sm hover:shadow-lg">
+            <ShieldCheck size={15}/> {t("dashboard.finalBond")}
           </button>
         </div>
       </div>
