@@ -1,29 +1,86 @@
-# On-Premises Deployment
+# On-Premises Deployment (incl. Oracle Cloud)
 
 Run TeleBid Enterprise on your own server instead of AWS — a single
 Docker Compose stack: Postgres, the backend, and Caddy as a reverse
-proxy/TLS terminator in front of the built frontend and the API. See
-`../README.md` (the AWS path) if you're hosting on AWS instead; the two
-are independent, pick one.
+proxy/TLS terminator in front of the built frontend and the API. This
+covers a server in your own office just as well as a VM you provision
+yourself on Oracle Cloud (see the dedicated Oracle section below) — any
+Linux box works the same way. See `../README.md` (the AWS path) if you're
+hosting on AWS instead; the two are independent, pick one.
 
 ## Validation status — read this first
 
-Docker's daemon isn't available in the sandbox this was authored in (no
-privileged access), so nothing here could be build-tested end-to-end.
-What **was** checked: every environment variable referenced in
-`docker-compose.prod.yml` and the Caddyfile cross-referenced by hand
-against `.env.prod.example` and `backend/app/core/config.py`'s actual
-`Settings` fields (no mismatches), `docker compose config` validation
-(see below), and the backup/restore scripts syntax-checked and dry-run
-against this session's local Postgres. **Not** verified: an actual Let's
-Encrypt certificate issuance (needs a real public domain), and a real
-`docker compose up --build` end-to-end. Run both as your first real
-step — if `docker compose config` and a first `up --build` succeed, the
-rest of this guide should hold.
+Every environment variable referenced in `docker-compose.prod.yml` and
+the Caddyfile was cross-referenced by hand against `.env.prod.example`
+and `backend/app/core/config.py`'s actual `Settings` fields (no
+mismatches), the backup/restore scripts were syntax-checked and
+dry-run against a local Postgres, and — as of this pass —
+`docker compose config` was actually run against this exact file and
+confirmed to resolve cleanly (all three services, networks, volumes,
+healthchecks; command below). A full `docker compose up --build` was
+also started for real in this environment; the backend and frontend
+images began building, but the sandbox's network policy blocks pulls
+from Docker Hub (the `postgres:16-alpine` base image), so the run
+couldn't finish here. That's a restriction specific to this authoring
+sandbox, not a problem with the compose file — a real server with
+normal internet access won't hit it. **Not** verified: an actual full
+`up --build` completing end-to-end, and real Let's Encrypt certificate
+issuance (needs a public domain). Run both as your first real step on
+your actual server — if they succeed, the rest of this guide should hold.
 
 ```bash
 docker compose --env-file .env.prod -f docker-compose.prod.yml config
 ```
+
+## Oracle Cloud (Always Free tier)
+
+Everything below runs unmodified on any Linux server, including a VM you
+provision yourself on Oracle Cloud — this isn't a separate deployment
+path, just this same Docker Compose stack on a specific provider. Oracle's
+free tier is the cheapest real option (an ARM Ampere VM with 4 OCPU / 24GB
+RAM, $0/month, no time limit), so it's worth calling out the two things
+that trip people up on Oracle specifically before you get to "First
+install" below.
+
+1. **Create the instance.** Console → Compute → Instances → Create
+   Instance. Pick an **Ampere (ARM) Always Free** shape — 4 OCPU / 24GB is
+   the free-tier ceiling, and this app is comfortable on a fraction of
+   that (see "Sizing"). Ubuntu 22.04 or later as the image. Generate or
+   upload an SSH key pair — you'll need it to log in, Oracle doesn't offer
+   a password login.
+
+2. **Open both firewalls — this is the one everyone misses.** Oracle
+   blocks inbound traffic at *two* independent layers, and missing either
+   one looks identical from outside (connection just times out):
+   - **The cloud-level firewall** (Security List or Network Security
+     Group, attached to the VM's subnet): add ingress rules for TCP 80
+     and 443 from `0.0.0.0/0`. Console → Networking → Virtual Cloud
+     Networks → your VCN → Security Lists → add the two rules.
+   - **The VM's own OS firewall** (`iptables`, active by default on
+     Oracle's Ubuntu images even though most other providers' images
+     ship it disabled): SSH in and run
+     ```bash
+     sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+     sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+     sudo netfilter-persistent save   # or: sudo apt install iptables-persistent
+     ```
+   Skip either step and `curl` from your own machine will just hang — not
+   a rejected connection, no error, nothing in the container logs, since
+   the traffic never reaches Docker at all.
+
+3. **Install Docker.**
+   ```bash
+   curl -fsSL https://get.docker.com | sudo sh
+   sudo usermod -aG docker $USER && newgrp docker
+   ```
+
+4. **Point your domain's DNS A record at the instance's public IP**
+   (Console → Instances → your instance → copy the Public IP address), or
+   skip this and follow "LAN-only / no domain" further down if you're
+   only accessing this over the VM's IP directly.
+
+Continue with "First install" below — from here it's identical to any
+other server.
 
 ## Prerequisites
 
