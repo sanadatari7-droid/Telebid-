@@ -12,7 +12,7 @@ export default function ApprovalsPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-screen-xl mx-auto">
-      <div><h1 className="text-xl font-bold text-primary-800">Approval Queue</h1><p className="text-sm text-gray-500">{pending.length} items awaiting decision</p></div>
+      <div><h1 className="font-display text-xl font-semibold text-primary-800">Approval Queue</h1><p className="text-sm text-gray-500">{pending.length} items awaiting decision</p></div>
       {!pending.length ? (
         <div className="card text-center py-16 text-gray-400"><ShieldCheck size={48} className="mx-auto mb-3 opacity-20"/><p className="font-medium">No pending approvals</p><p className="text-sm mt-1">All items reviewed</p></div>
       ) : pending.map(bid => <ApprovalCard key={bid.bid_id} bid={bid} onDecide={d=>approveMut.mutate({bid_id:bid.bid_id,...d})} loading={approveMut.isPending}/>)}

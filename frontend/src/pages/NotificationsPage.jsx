@@ -15,7 +15,7 @@ export default function NotificationsPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-lg mx-auto">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-primary-800">Notifications</h1><p className="text-sm text-gray-500">{items.filter(n=>!n.is_read).length} unread</p></div>
+        <div><h1 className="font-display text-xl font-semibold text-primary-800">Notifications</h1><p className="text-sm text-gray-500">{items.filter(n=>!n.is_read).length} unread</p></div>
         <button className="btn-secondary" onClick={()=>markAll.mutate()}><CheckCheck size={14}/> Mark All Read</button>
       </div>
       <div className="space-y-2">

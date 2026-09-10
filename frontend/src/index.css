@@ -153,6 +153,20 @@
   .kpi-value { @apply font-display text-2xl font-semibold text-gray-900; }
   .kpi-label { @apply text-xs font-medium text-gray-400 uppercase tracking-wide mt-0.5; }
 
+  /* Small centered stat tiles (Bonds, AI Alerts, Won/Lost Records, the
+     opportunity pipeline strip) all share this card-sm + text-center
+     combination — give the whole family the same hover lift as the
+     dashboard's KPI cards without having to touch each page's markup. */
+  .card-sm.text-center {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover;
+  }
+  .card-sm.text-center > div:first-child {
+    @apply shadow-sm transition-transform duration-200;
+  }
+  .card-sm.text-center:hover > div:first-child {
+    transform: scale(1.08);
+  }
+
   /* ── Timeline ─────────────────────────────────────────────────── */
   .timeline-item {
     @apply relative pl-8 pb-6 last:pb-0;
@@ -177,8 +191,8 @@
     @apply flex flex-col items-center justify-center py-16 text-center;
   }
   .empty-icon {
-    @apply w-16 h-16 rounded-2xl bg-gray-50 flex items-center justify-center
-           text-gray-300 mb-4;
+    @apply w-16 h-16 rounded-2xl bg-primary-50 flex items-center justify-center
+           text-primary-300 mb-4;
   }
 
   /* ── Sidebar Nav ──────────────────────────────────────────────── */

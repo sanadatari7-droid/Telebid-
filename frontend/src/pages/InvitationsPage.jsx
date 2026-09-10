@@ -36,7 +36,7 @@ export default function InvitationsPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-primary-800">Invitation Management</h1><p className="text-sm text-gray-500">Invite vendors to bids and track responses</p></div>
+        <div><h1 className="font-display text-xl font-semibold text-primary-800">Invitation Management</h1><p className="text-sm text-gray-500">Invite vendors to bids and track responses</p></div>
         {selectedBidId && <button className="btn-primary" onClick={()=>setShowInvite(true)}><Mail size={15}/> Invite Vendor</button>}
       </div>
 

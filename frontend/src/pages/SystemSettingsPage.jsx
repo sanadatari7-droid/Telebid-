@@ -72,7 +72,7 @@ export default function SystemSettingsPage() {
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-primary-800">System Settings</h1>
+          <h1 className="font-display text-xl font-semibold text-primary-800">System Settings</h1>
           <p className="text-sm text-gray-500">Configure the application without modifying code</p>
         </div>
         <div className="flex gap-2">

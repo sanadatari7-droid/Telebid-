@@ -116,7 +116,7 @@ export default function BidsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-primary-800">Bids & Tenders</h1>
+          <h1 className="font-display text-xl font-semibold text-primary-800">Bids & Tenders</h1>
           <p className="text-sm text-gray-500">{data?.total ?? 0} total records</p>
         </div>
         <button className="btn-primary" onClick={() => setShowCreate(true)}>

@@ -104,7 +104,7 @@ export default function BidDetailPage() {
             <span className="badge" style={{ background:(bid.color_hex||"#9CA3AF")+"22", color:bid.color_hex||"#9CA3AF" }}>{bid.status_name}</span>
             <span className="badge-blue">{bid.bid_type_code}</span>
           </div>
-          <h1 className="text-xl font-bold text-primary-800 mt-2">{bid.bid_title}</h1>
+          <h1 className="font-display text-xl font-semibold text-primary-800 mt-2">{bid.bid_title}</h1>
           <p className="text-sm text-gray-500 mt-1">{bid.dept_name} · {bid.created_by_name} · {fmt(bid.created_at)}</p>
         </div>
         {bid.status_code !== "ARCHIVED" && (

@@ -21,7 +21,7 @@ export default function ReferencesPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-xl mx-auto">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-primary-800">Company References</h1><p className="text-sm text-gray-500">Reusable project references — auto-versioned on update</p></div>
+        <div><h1 className="font-display text-xl font-semibold text-primary-800">Company References</h1><p className="text-sm text-gray-500">Reusable project references — auto-versioned on update</p></div>
         <button className="btn-primary" onClick={()=>setShowCreate(true)}><Plus size={15}/> Add Reference</button>
       </div>
       <div className="card py-3"><input className="input py-2" placeholder="Search references…" value={search} onChange={e=>setSearch(e.target.value)}/></div>

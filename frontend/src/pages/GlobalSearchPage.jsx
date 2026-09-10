@@ -32,7 +32,7 @@ export default function GlobalSearchPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-screen-lg mx-auto">
-      <div><h1 className="text-xl font-bold text-primary-800">Global Search</h1><p className="text-sm text-gray-500">Search across bids, vendors, opportunities, and contracts</p></div>
+      <div><h1 className="font-display text-xl font-semibold text-primary-800">Global Search</h1><p className="text-sm text-gray-500">Search across bids, vendors, opportunities, and contracts</p></div>
 
       <div className="relative">
         <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"/>

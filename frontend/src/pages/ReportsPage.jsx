@@ -53,7 +53,7 @@ export default function ReportsPage() {
     <div className="p-6 space-y-6 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-primary-800">Reports & Analytics</h1>
+          <h1 className="font-display text-xl font-semibold text-primary-800">Reports & Analytics</h1>
           <p className="text-sm text-gray-500">Procurement performance insights and KPIs</p>
         </div>
       </div>

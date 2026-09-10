@@ -50,7 +50,7 @@ export default function ICTPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-primary-800">ICT Module — Non-Telecom</h1><p className="text-sm text-gray-500">ICT projects: Construction, Infrastructure, Cybersecurity and more</p></div>
+        <div><h1 className="font-display text-xl font-semibold text-primary-800">ICT Module — Non-Telecom</h1><p className="text-sm text-gray-500">ICT projects: Construction, Infrastructure, Cybersecurity and more</p></div>
         <button className="btn-primary" onClick={()=>setShowCreate(true)}><Plus size={15}/> New ICT Project</button>
       </div>
 

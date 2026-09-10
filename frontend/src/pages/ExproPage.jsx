@@ -50,7 +50,7 @@ export default function ExproPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-primary-800">EXPRO Log</h1><p className="text-sm text-gray-500">Oil & Gas Exploration — Government Tender Logs</p></div>
+        <div><h1 className="font-display text-xl font-semibold text-primary-800">EXPRO Log</h1><p className="text-sm text-gray-500">Oil & Gas Exploration — Government Tender Logs</p></div>
         <div className="flex gap-2">
           {hasRole("ADMIN") && <button className="btn-secondary btn-sm" onClick={()=>setTab(tab==="fields"?"logs":"fields")}><Settings size={14}/> {tab==="fields"?"View Logs":"Configure Fields"}</button>}
           <button className="btn-primary" onClick={()=>setShowCreate(true)}><Plus size={15}/> New EXPRO Log</button>

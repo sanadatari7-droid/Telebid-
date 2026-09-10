@@ -17,7 +17,7 @@ export default function WatchlistPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-screen-xl mx-auto">
-      <div><h1 className="text-xl font-bold text-primary-800">Watchlist</h1><p className="text-sm text-gray-500">Bids you are monitoring — {items.length} items</p></div>
+      <div><h1 className="font-display text-xl font-semibold text-primary-800">Watchlist</h1><p className="text-sm text-gray-500">Bids you are monitoring — {items.length} items</p></div>
 
       {isLoading ? <div className="text-center py-12"><div className="inline-block animate-spin w-6 h-6 border-4 border-primary-500 border-t-transparent rounded-full"/></div>
       : !items.length ? (

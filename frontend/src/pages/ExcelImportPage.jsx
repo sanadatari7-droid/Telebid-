@@ -66,7 +66,7 @@ export default function ExcelImportPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-xl mx-auto">
       <div>
-        <h1 className="text-xl font-bold text-primary-800">Excel Import — Evaluation Criteria</h1>
+        <h1 className="font-display text-xl font-semibold text-primary-800">Excel Import — Evaluation Criteria</h1>
         <p className="text-sm text-gray-500">Upload your Excel file to import evaluation fields and dropdown values</p>
       </div>
 

@@ -74,7 +74,7 @@ export default function CalendarPage() {
   return (
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
       <div>
-        <h1 className="text-xl font-bold text-primary-800">Procurement Calendar</h1>
+        <h1 className="font-display text-xl font-semibold text-primary-800">Procurement Calendar</h1>
         <p className="text-sm text-gray-500">Submission deadlines, evaluations, and contract dates</p>
       </div>
 

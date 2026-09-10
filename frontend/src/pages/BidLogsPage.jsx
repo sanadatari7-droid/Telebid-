@@ -19,7 +19,7 @@ export default function BidLogsPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
-      <div><h1 className="text-xl font-bold text-primary-800">Bid Logs</h1><p className="text-sm text-gray-500">Detailed activity logs for all bid-related actions</p></div>
+      <div><h1 className="font-display text-xl font-semibold text-primary-800">Bid Logs</h1><p className="text-sm text-gray-500">Detailed activity logs for all bid-related actions</p></div>
 
       <div className="border-b border-gray-200">
         <div className="flex">
