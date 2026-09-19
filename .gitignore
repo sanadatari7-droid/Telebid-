@@ -30,15 +30,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Terraform
-**/.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-!*.tfvars.example
-crash.log
-crash.*.log
-
 # On-premises deployment
 .env.prod
 !.env.prod.example

@@ -5,16 +5,13 @@ Applies database/schema.sql to whatever DATABASE_URL points at.
 Every statement in schema.sql is written idempotently (CREATE TABLE IF NOT
 EXISTS, ADD COLUMN IF NOT EXISTS, etc.), so this is safe to run against a
 brand-new empty database (bootstraps every table) or an already-up-to-date
-one (no-ops). This is what makes a fresh RDS instance usable — RDS has no
-docker-entrypoint-initdb.d equivalent, and app/main.py's run_migrations()
-only handles tables added after the original schema was written, not the
-foundational ones.
+one (no-ops). app/main.py's run_migrations() only handles tables added
+after the original schema was written, not the foundational ones, so this
+script is the one that bootstraps a fresh database from nothing.
 
-Run as a one-off ECS Fargate task (see infra/terraform/modules/ecs) using
-the same task definition/image, with the container command overridden to
-run this script instead of uvicorn — that way it inherits the same VPC
-subnets and security group as the app, so it can reach a private RDS
-instance without a bastion host.
+For the Docker Compose deployment path (see infra/on-premises/README.md),
+run this after pulling new code as the standard schema-upgrade step:
+    docker compose --env-file .env.prod -f docker-compose.prod.yml exec backend python scripts/apply_schema.py
 
 Usage:
     python scripts/apply_schema.py

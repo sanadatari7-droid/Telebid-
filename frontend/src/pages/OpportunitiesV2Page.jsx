@@ -1536,7 +1536,6 @@ function CreateModal({ onClose }) {
               </label>
 
               <div className="section-title mt-2">RFP Source <span className="text-gray-400 font-normal normal-case">(select one)</span></div>
-              <div className="alert-info text-xs mb-2">Check Box — only one item can be chosen</div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {["Etimad","Email","Client","Portal"].map(src=>(
                   <label key={src} className={clsx("flex items-center gap-2 p-3 border rounded-xl cursor-pointer transition-all",
