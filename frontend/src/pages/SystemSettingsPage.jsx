@@ -54,7 +54,8 @@ export default function SystemSettingsPage() {
 
   const updateMut = useMutation({
     mutationFn: ({ key, value }) => settingsApi.update(key, value),
-    onSuccess: () => { toast.success("Setting updated"); qc.invalidateQueries({ queryKey: ["system-settings"] }); setEditingKey(null) }
+    onSuccess: () => { toast.success("Setting updated"); qc.invalidateQueries({ queryKey: ["system-settings"] }); setEditingKey(null) },
+    onError: err => toast.error(apiErrorMessage(err, "Failed to update setting"))
   })
   const updateCompanyMut = useMutation({
     mutationFn: d => settingsApi.updateCompany(d),
