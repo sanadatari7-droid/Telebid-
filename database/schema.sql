@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_locked BOOLEAN DEFAULT FALSE, failed_attempts INT DEFAULT 0,
     otp_secret VARCHAR(100), otp_enabled BOOLEAN DEFAULT TRUE,
     last_login TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(), created_by INT
+    updated_at TIMESTAMPTZ DEFAULT NOW(), created_by INT,
+    password_changed_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS user_roles (
     user_id INT NOT NULL REFERENCES users(user_id),
@@ -723,6 +724,7 @@ INSERT INTO system_settings (company_id, setting_key, setting_value, setting_typ
     (1, 'max_upload_mb',       '25',                 'NUMBER',  'SYSTEM',     'Max Upload Size (MB)'),
     (1, 'session_timeout_min', '60',                 'NUMBER',  'SECURITY',   'Session Timeout (Minutes)'),
     (1, 'otp_enabled',         'true',               'BOOLEAN', 'SECURITY',   'Enable OTP Login'),
+    (1, 'password_rotation_days', '30',              'NUMBER',  'SECURITY',   'Password Rotation (Days)'),
     (1, 'google_maps_key',     '',                   'SECRET',  'INTEGRATIONS','Google Maps API Key'),
     (1, 'smtp_host',           '',                   'TEXT',    'EMAIL',      'SMTP Host'),
     (1, 'smtp_port',           '587',                'NUMBER',  'EMAIL',      'SMTP Port'),

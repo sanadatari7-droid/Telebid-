@@ -11,9 +11,10 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { setAuth } = useAuthStore()
-  const [step, setStep] = useState("login")   // login | otp
-  const [form, setForm] = useState({ username:"", password:"", otp:"" })
+  const [step, setStep] = useState("login")   // login | otp | expired
+  const [form, setForm] = useState({ username:"", password:"", otp:"", newPassword:"", confirmPassword:"" })
   const [session, setSession] = useState(null)
+  const [resetToken, setResetToken] = useState(null)
   const [demoOtp, setDemoOtp] = useState(null)
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -46,7 +47,11 @@ export default function LoginPage() {
         username: form.username.trim(),
         password: form.password,
       })
-      if (data.requires_otp) {
+      if (data.password_expired) {
+        setResetToken(data.reset_token)
+        toast(data.message || "Your password has expired. Please set a new one.", { icon: "🔒" })
+        setStep("expired")
+      } else if (data.requires_otp) {
         setSession(data.session_token)
         // If SMTP not configured, demo_otp is shown — auto-fill it
         if (data.demo_otp) {
@@ -84,7 +89,11 @@ export default function LoginPage() {
         session_token: session,
         otp_code: form.otp,
       })
-      if (data.access_token) {
+      if (data.password_expired) {
+        setResetToken(data.reset_token)
+        toast(data.message || "Your password has expired. Please set a new one.", { icon: "🔒" })
+        setStep("expired")
+      } else if (data.access_token) {
         setAuth(data)
         toast.success(`Welcome back, ${data.user?.full_name || data.user?.username}!`)
         navigate("/dashboard", { replace: true })
@@ -99,12 +108,39 @@ export default function LoginPage() {
     }
   }
 
+  // ── Step 3: Password Expired — set a new one ─────────────────────────────
+  const handleSetNewPassword = async (e) => {
+    e.preventDefault()
+    if (form.newPassword.length < 8) { setError("Password must be at least 8 characters"); return }
+    if (!/[A-Z]/.test(form.newPassword)) { setError("Password must contain at least one uppercase letter"); return }
+    if (!/[0-9]/.test(form.newPassword)) { setError("Password must contain at least one number"); return }
+    if (form.newPassword !== form.confirmPassword) { setError("Passwords do not match"); return }
+    setLoading(true); setError("")
+    try {
+      const { data } = await authApi.setNewPassword({
+        reset_token: resetToken,
+        new_password: form.newPassword,
+      })
+      if (data.access_token) {
+        setAuth(data)
+        toast.success("Password updated — welcome back!")
+        navigate("/dashboard", { replace: true })
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.detail
+      setError(typeof msg === "string" ? msg : "Could not update your password. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const goBack = () => {
     setStep("login")
     setError("")
     setDemoOtp(null)
     setSession(null)
-    setForm(p => ({ ...p, otp: "" }))
+    setResetToken(null)
+    setForm(p => ({ ...p, otp:"", newPassword:"", confirmPassword:"" }))
   }
 
   return (
@@ -303,6 +339,67 @@ export default function LoginPage() {
                   {loading
                     ? <><Loader2 size={16} className="animate-spin"/> Verifying…</>
                     : "Verify & Continue"}
+                </button>
+              </form>
+
+              <button
+                onClick={goBack}
+                className="w-full text-center text-sm text-gray-400 hover:text-gray-600 mt-4 transition-colors">
+                ← Back to sign in
+              </button>
+            </div>
+          )}
+
+          {/* ── Step 3: Password Expired ──────────────────────────────────── */}
+          {step === "expired" && (
+            <div>
+              <div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center mb-6">
+                <Lock size={26} className="text-amber-600"/>
+              </div>
+              <h1 className="font-display text-2xl font-semibold text-gray-900 mb-1">Set a new password</h1>
+              <p className="text-gray-400 text-sm mb-6">Your password has expired and needs to be renewed before you can sign in.</p>
+
+              {error && (
+                <div className="flex items-start gap-2 p-3.5 bg-red-50 border border-red-200 rounded-xl mb-5 text-red-700 text-sm">
+                  <AlertCircle size={15} className="flex-shrink-0 mt-0.5"/>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSetNewPassword} className="space-y-4">
+                <div>
+                  <label className="label">New Password</label>
+                  <div className="relative">
+                    <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"/>
+                    <input name="newPassword" type={showPw ? "text" : "password"}
+                      className="input pl-10 pr-10"
+                      placeholder="At least 8 characters"
+                      value={form.newPassword} onChange={fc}
+                      autoFocus autoComplete="new-password"/>
+                    <button type="button"
+                      onClick={() => setShowPw(!showPw)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      {showPw ? <EyeOff size={15}/> : <Eye size={15}/>}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Must include an uppercase letter and a number.</p>
+                </div>
+
+                <div>
+                  <label className="label">Confirm New Password</label>
+                  <input name="confirmPassword" type={showPw ? "text" : "password"}
+                    className="input"
+                    placeholder="Retype your new password"
+                    value={form.confirmPassword} onChange={fc}
+                    autoComplete="new-password"/>
+                </div>
+
+                <button type="submit"
+                  className="btn-primary w-full justify-center py-3 text-base mt-2"
+                  disabled={loading}>
+                  {loading
+                    ? <><Loader2 size={16} className="animate-spin"/> Updating…</>
+                    : "Set Password & Sign In"}
                 </button>
               </form>
 

@@ -422,6 +422,26 @@ async def run_migrations():
             (1,'email_enabled','false','BOOL','EMAIL','Enable Email')
         ON CONFLICT DO NOTHING;
         """,
+        # ── users: add password_changed_at (password rotation feature) ────────
+        """
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='users' AND column_name='password_changed_at'
+            ) THEN
+                ALTER TABLE users ADD COLUMN password_changed_at TIMESTAMPTZ DEFAULT NOW();
+                UPDATE users SET password_changed_at = COALESCE(created_at, NOW()) WHERE password_changed_at IS NULL;
+                RAISE NOTICE 'Migration: added users.password_changed_at';
+            END IF;
+        END$$;
+        """,
+        # ── system_settings: ensure password_rotation_days exists per company ─
+        """
+        INSERT INTO system_settings (company_id, setting_key, setting_value, setting_type, category, label)
+        SELECT c.company_id, 'password_rotation_days', '30', 'NUMBER', 'SECURITY', 'Password Rotation (Days)'
+        FROM companies c
+        ON CONFLICT DO NOTHING;
+        """,
     ]
 
     async with pool.acquire() as conn:

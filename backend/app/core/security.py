@@ -36,6 +36,17 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def create_password_reset_token(data: Dict[str, Any]) -> str:
+    """Short-lived, single-purpose token issued when a login can't proceed
+    because the password has expired. Its 'type' claim ('pwd_reset') is
+    rejected by get_current_user, so this token can never be used as a
+    general bearer token — only /auth/set-new-password accepts it."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire, "type": "pwd_reset"})
+    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 def decode_token(token: str) -> Dict[str, Any]:
     try:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])

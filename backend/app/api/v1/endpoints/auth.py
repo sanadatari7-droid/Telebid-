@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.db.postgres import get_db, fetch_one, execute, fetch_val
 from app.core.security import (
     verify_password, create_access_token, create_refresh_token,
-    generate_otp_secret, generate_totp, decode_token, hash_password
+    create_password_reset_token, generate_otp_secret, generate_totp,
+    decode_token, hash_password
 )
 from app.core.config import settings
 from app.middleware.auth import require_roles, CurrentUser
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from datetime import datetime, timezone, timedelta
 import secrets, re
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -40,13 +42,19 @@ class TenantSignupRequest(BaseModel):
     admin_full_name: str
 
 
+class SetNewPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+
 # ── Login ─────────────────────────────────────────────────────────────────────
 
 @router.post("/login")
 async def login(body: LoginRequest, conn=Depends(get_db)):
     user = await fetch_one(conn, """
         SELECT user_id, username, email, full_name, password_hash,
-               is_active, is_locked, failed_attempts, otp_secret, otp_enabled, company_id
+               is_active, is_locked, failed_attempts, otp_secret, otp_enabled, company_id,
+               password_changed_at
         FROM users WHERE username=$1 OR email=$1""", body.username)
 
     if not user:
@@ -144,10 +152,77 @@ async def verify_otp(body: OTPVerify, conn=Depends(get_db)):
     return await _issue_tokens(conn, user)
 
 
+# ── Set New Password (after a password-expired login attempt) ─────────────────
+
+@router.post("/set-new-password")
+async def set_new_password(body: SetNewPasswordRequest, conn=Depends(get_db)):
+    """Completes a login that was blocked by password rotation. reset_token
+    only comes from _issue_tokens' expired-password branch, is scoped to a
+    single user, and expires in 15 minutes — decode_token's normal validation
+    (signature + exp) applies, plus the type check below since this is a
+    'pwd_reset' token, not the 'access' type get_current_user requires."""
+    try:
+        payload = decode_token(body.reset_token)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="This reset link has expired. Please log in again.")
+    if payload.get("type") != "pwd_reset":
+        raise HTTPException(status_code=401, detail="Invalid reset token")
+    uid = int(payload.get("sub"))
+
+    _validate_password(body.new_password)
+
+    user = await fetch_one(conn, "SELECT password_hash FROM users WHERE user_id=$1", uid)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if verify_password(body.new_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="New password must be different from your current password")
+
+    new_hash = hash_password(body.new_password)
+    await execute(conn,
+        "UPDATE users SET password_hash=$1, password_changed_at=NOW(), failed_attempts=0 WHERE user_id=$2",
+        new_hash, uid)
+
+    try:
+        await execute(conn,
+            "INSERT INTO audit_logs (user_id, action, module) VALUES ($1,'PASSWORD_ROTATED','AUTH')", uid)
+    except Exception:
+        pass
+
+    full_user = await fetch_one(conn, "SELECT * FROM users WHERE user_id=$1", uid)
+    return await _issue_tokens(conn, full_user)
+
+
 # ── Token helper ──────────────────────────────────────────────────────────────
 
 async def _issue_tokens(conn, user: dict) -> dict:
     uid = user["user_id"]
+
+    # ── Password rotation check ────────────────────────────────────────────
+    # Runs on every path that reaches a real login (direct, post-OTP, and
+    # signup) since they all converge here. A freshly created or just-reset
+    # password is always well within the window, so this never blocks
+    # signup/reset itself — only a login with a password that's actually gone
+    # stale past the company's configured rotation period.
+    changed_at = user.get("password_changed_at")
+    if changed_at is not None:
+        rotation_days = await fetch_val(conn,
+            "SELECT setting_value FROM system_settings WHERE company_id=$1 AND setting_key='password_rotation_days'",
+            user.get("company_id"))
+        try:
+            rotation_days = int(rotation_days) if rotation_days else 30
+        except (TypeError, ValueError):
+            rotation_days = 30
+        if rotation_days > 0:
+            if changed_at.tzinfo is None:
+                changed_at = changed_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - changed_at > timedelta(days=rotation_days):
+                reset_token = create_password_reset_token({"sub": str(uid)})
+                return {
+                    "requires_otp": False,
+                    "password_expired": True,
+                    "reset_token": reset_token,
+                    "message": f"Your password is more than {rotation_days} days old and must be changed before you can continue.",
+                }
 
     # company_id in the JWT is convenience/debugging metadata only — every
     # request re-derives it fresh from the users table (see get_current_user),
@@ -264,6 +339,17 @@ async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
         role_id = await fetch_val(conn, "SELECT role_id FROM roles WHERE role_code='ADMIN'")
         if role_id:
             await execute(conn, "INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2)", uid, role_id)
+
+        # Security defaults so this company can see/edit them immediately
+        # under System Settings, instead of waiting for the next server
+        # restart's migration pass to backfill them.
+        await execute(conn, """
+            INSERT INTO system_settings (company_id, setting_key, setting_value, setting_type, category, label)
+            VALUES
+                ($1,'session_timeout_min','60','NUMBER','SECURITY','Session Timeout (Minutes)'),
+                ($1,'otp_enabled','true','BOOLEAN','SECURITY','Enable OTP Login'),
+                ($1,'password_rotation_days','30','NUMBER','SECURITY','Password Rotation (Days)')
+            ON CONFLICT DO NOTHING""", company_id)
 
     try:
         await execute(conn,

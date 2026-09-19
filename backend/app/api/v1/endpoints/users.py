@@ -134,7 +134,7 @@ async def reset_password(user_id: int, body: PasswordReset, conn=Depends(get_db)
     company_id = require_company(current_user)
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    result = await execute(conn, "UPDATE users SET password_hash=$1, failed_attempts=0, is_locked=FALSE WHERE user_id=$2 AND company_id=$3",
+    result = await execute(conn, "UPDATE users SET password_hash=$1, password_changed_at=NOW(), failed_attempts=0, is_locked=FALSE WHERE user_id=$2 AND company_id=$3",
         hash_password(body.new_password), user_id, company_id)
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Password reset"}

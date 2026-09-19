@@ -52,6 +52,7 @@ export const authApi = {
   refreshToken: () => api.post("/auth/refresh"),
   register:   d => api.post("/auth/register", d),
   signup:     d => api.post("/auth/signup", d),
+  setNewPassword: d => api.post("/auth/set-new-password", d),
 }
 
 // ── BIDS ──────────────────────────────────────────────────────────────────────
