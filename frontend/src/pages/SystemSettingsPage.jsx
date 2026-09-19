@@ -1,9 +1,11 @@
 import React, { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { settingsApi } from "../services/api"
+import { apiErrorMessage } from "../utils/apiError"
+import { useAuthStore } from "../store/authStore"
 import toast from "react-hot-toast"
 import clsx from "clsx"
-import { Settings, Building2, Globe, Shield, Bell, Database, Plus, Trash2, Edit2, Save, X } from "lucide-react"
+import { Settings, Building2, Globe, Shield, Bell, Database, Plus, Trash2, Edit2, Save, X, Send } from "lucide-react"
 
 const CATEGORIES = [
   { key:"COMPANY",     label:"Company Info",    icon:Building2 },
@@ -19,12 +21,14 @@ const CATEGORIES = [
 
 export default function SystemSettingsPage() {
   const qc = useQueryClient()
+  const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState("COMPANY")
   const [editingKey, setEditingKey] = useState(null)
   const [editValue, setEditValue] = useState("")
   const [showDropdowns, setShowDropdowns] = useState(false)
   const [selectedDropdown, setSelectedDropdown] = useState("")
   const [newOption, setNewOption] = useState({ option_value:"", option_label:"" })
+  const [testEmailTo, setTestEmailTo] = useState("")
 
   const { data: settings = [] } = useQuery({
     queryKey: ["system-settings", activeTab],
@@ -64,9 +68,15 @@ export default function SystemSettingsPage() {
     mutationFn: val => settingsApi.deleteDropdownOption(selectedDropdown, val),
     onSuccess: () => { toast.success("Option removed"); qc.invalidateQueries({ queryKey: ["dropdown-options", selectedDropdown] }) }
   })
+  const testEmailMut = useMutation({
+    mutationFn: email => settingsApi.testEmail(email),
+    onSuccess: res => toast.success(res.data?.message || "Test email sent"),
+    onError: err => toast.error(apiErrorMessage(err, "Failed to send test email"))
+  })
 
   const [companyForm, setCompanyForm] = useState({})
   React.useEffect(() => { if (company) setCompanyForm(company) }, [company])
+  React.useEffect(() => { if (user?.email && !testEmailTo) setTestEmailTo(user.email) }, [user])
 
   return (
     <div className="p-6 space-y-5 max-w-screen-2xl mx-auto">
@@ -203,6 +213,17 @@ export default function SystemSettingsPage() {
           {!["COMPANY","DROPDOWNS_ICT"].includes(activeTab) && (
             <div className="card">
               <h3 className="font-semibold text-gray-700 mb-5">{CATEGORIES.find(c=>c.key===activeTab)?.label} Settings</h3>
+              {activeTab === "EMAIL" && (
+                <div className="flex items-center gap-2 mb-5 p-4 bg-primary-50 rounded-xl border border-primary-100">
+                  <Send size={15} className="text-primary-600 flex-shrink-0"/>
+                  <input className="input py-1.5 text-sm flex-1" type="email" placeholder="Send a test email to…"
+                    value={testEmailTo} onChange={e => setTestEmailTo(e.target.value)}/>
+                  <button className="btn-primary btn-sm flex-shrink-0" disabled={!testEmailTo || testEmailMut.isPending}
+                    onClick={() => testEmailMut.mutate(testEmailTo)}>
+                    {testEmailMut.isPending ? "Sending…" : "Send Test Email"}
+                  </button>
+                </div>
+              )}
               {settings.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">No settings in this category</p>
               ) : (
