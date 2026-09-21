@@ -12,6 +12,7 @@ on:
       - "backend/**"
       - "database/schema.sql"
       - ".github/workflows/test.yml"
+  workflow_dispatch: {}
 
 jobs:
   pytest:
