@@ -47,7 +47,8 @@ async def send_deadline_reminders(
         if bid["email"] and bid["days_left"] is not None:
             ok = await send_deadline_reminder(
                 bid["email"], bid["full_name"],
-                bid["bid_number"], bid["bid_title"], bid["days_left"])
+                bid["bid_number"], bid["bid_title"], bid["days_left"],
+                company_id=company_id)
             if ok:
                 results["bid_reminders_sent"] += 1
                 await execute(conn,
@@ -95,7 +96,8 @@ async def send_deadline_reminders(
                 customer_name=opp["customer_name"],
                 submission_deadline=deadline_str,
                 days_left=days_left,
-                role="BID_PERSON")
+                role="BID_PERSON",
+                company_id=company_id)
             if ok:
                 any_sent = True
                 results["bond_reminders_sent"] += 1
@@ -118,7 +120,8 @@ async def send_deadline_reminders(
                 customer_name=opp["customer_name"],
                 submission_deadline=deadline_str,
                 days_left=days_left,
-                role="MANAGER")
+                role="MANAGER",
+                company_id=company_id)
             if ok_mgr:
                 any_sent = True
                 results["bond_reminders_sent"] += 1
@@ -205,7 +208,7 @@ async def notify_bid_event(
     sent = 0
     for u in users:
         if u["email"]:
-            ok = await send_bid_notification(u["email"], u["full_name"], subject, message, bnr)
+            ok = await send_bid_notification(u["email"], u["full_name"], subject, message, bnr, company_id=company_id)
             if ok:
                 sent += 1
                 await execute(conn,

@@ -1116,7 +1116,8 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
 
     if opp.get("bid_person_email"):
         ok = await send_bond_reminder(opp["bid_person_email"], opp["bid_person_name"],
-            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "BID_PERSON")
+            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "BID_PERSON",
+            company_id=company_id)
         if ok:
             sent_to.append(opp["bid_person_name"])
             await execute(conn,
@@ -1128,7 +1129,8 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
 
     if opp.get("manager_email") and opp.get("manager_user_id") != opp.get("bid_person_id"):
         ok = await send_bond_reminder(opp["manager_email"], opp["manager_name"],
-            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "MANAGER")
+            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "MANAGER",
+            company_id=company_id)
         if ok:
             sent_to.append(f"{opp['manager_name']} (Manager)")
             await execute(conn,

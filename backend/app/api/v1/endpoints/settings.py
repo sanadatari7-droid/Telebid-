@@ -122,11 +122,12 @@ async def add_ict_category(body: dict, conn=Depends(get_db),
 @router.post("/test-email")
 async def test_email(body: dict, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     from app.services.email_service import send_email
+    company_id = require_company(current_user)
     recipient = body.get("email") or current_user.email
     if not recipient:
         raise HTTPException(status_code=400, detail="No recipient email")
     ok = await send_email(recipient, "TeleBid Enterprise — SMTP Test",
         "<h2>✅ SMTP Working!</h2><p>Your email configuration is working correctly.</p>",
-        "SMTP Test successful.")
+        "SMTP Test successful.", company_id=company_id)
     if ok: return {"message": f"Test email sent to {recipient}"}
     raise HTTPException(status_code=500, detail="Failed to send test email — check SMTP settings")

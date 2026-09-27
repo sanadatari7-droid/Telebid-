@@ -250,6 +250,7 @@ async def scan(conn, company_id: int) -> dict:
                 recommended_action=pick["recommended_action"],
                 severity=pick["severity"], opp_number=c["opp_number"],
                 customer_name=c["customer_name"], ai_generated=is_configured(),
+                company_id=company_id,
             )
             sent_ok = sent_ok or ok
 
