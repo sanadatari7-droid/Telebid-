@@ -132,6 +132,19 @@ export const oppsV2Api = {
   addRequirement:           (id, d) => api.post(`/opportunities-v2/${id}/requirements`, d),
   updateRequirement:        (id, reqId, d) => api.patch(`/opportunities-v2/${id}/requirements/${reqId}`, d),
   deleteRequirement:        (id, reqId) => api.delete(`/opportunities-v2/${id}/requirements/${reqId}`),
+  getQualification:         id => api.get(`/opportunities-v2/${id}/qualification`),
+  submitQualification:      (id, d) => api.post(`/opportunities-v2/${id}/qualification`, d),
+  getCapture:               id => api.get(`/opportunities-v2/${id}/capture`),
+  saveCapture:              (id, d) => api.put(`/opportunities-v2/${id}/capture`, d),
+  getColorReviews:          id => api.get(`/opportunities-v2/${id}/color-reviews`),
+  scheduleColorReview:      (id, d) => api.post(`/opportunities-v2/${id}/color-reviews`, d),
+  updateColorReview:        (id, reviewId, d) => api.patch(`/opportunities-v2/${id}/color-reviews/${reviewId}`, d),
+  completeColorReview:      (id, reviewId, d) => api.post(`/opportunities-v2/${id}/color-reviews/${reviewId}/complete`, d),
+  deleteColorReview:        (id, reviewId) => api.delete(`/opportunities-v2/${id}/color-reviews/${reviewId}`),
+  getWinThemes:             id => api.get(`/opportunities-v2/${id}/win-themes`),
+  addWinTheme:              (id, d) => api.post(`/opportunities-v2/${id}/win-themes`, d),
+  updateWinTheme:           (id, themeId, d) => api.patch(`/opportunities-v2/${id}/win-themes/${themeId}`, d),
+  deleteWinTheme:           (id, themeId) => api.delete(`/opportunities-v2/${id}/win-themes/${themeId}`),
 }
 
 // ── VENDORS ───────────────────────────────────────────────────────────────────

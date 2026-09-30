@@ -1684,3 +1684,101 @@ CREATE TABLE IF NOT EXISTS content_library_items (
 );
 CREATE INDEX IF NOT EXISTS idx_content_library_company_id ON content_library_items(company_id);
 CREATE INDEX IF NOT EXISTS idx_content_library_question_trgm ON content_library_items USING gin (question gin_trgm_ops);
+
+-- ── Formal Bid/No-Bid Qualification (APMP/Shipley-style scoring) ────────
+-- One row per scoring event (append-only, latest = current) — the
+-- human-authored counterpart to opp_ai_insights' AI-generated
+-- recommendation, kept as its own history rather than overwritten.
+CREATE TABLE IF NOT EXISTS opportunity_qualifications (
+    qualification_id  SERIAL PRIMARY KEY,
+    opp_id             INT NOT NULL REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    company_id         INT NOT NULL REFERENCES companies(company_id),
+    -- Each criterion scored 0-5 (0 = worst fit / highest risk, 5 = best fit)
+    score_customer_relationship INT NOT NULL CHECK (score_customer_relationship BETWEEN 0 AND 5),
+    score_competitive_position  INT NOT NULL CHECK (score_competitive_position BETWEEN 0 AND 5),
+    score_technical_fit         INT NOT NULL CHECK (score_technical_fit BETWEEN 0 AND 5),
+    score_financial_value       INT NOT NULL CHECK (score_financial_value BETWEEN 0 AND 5),
+    score_resource_availability INT NOT NULL CHECK (score_resource_availability BETWEEN 0 AND 5),
+    score_strategic_fit         INT NOT NULL CHECK (score_strategic_fit BETWEEN 0 AND 5),
+    weighted_total     NUMERIC(5,2) NOT NULL,   -- computed server-side, 0-100
+    recommendation     VARCHAR(20) NOT NULL,    -- BID | NO_BID | CONDITIONAL_BID
+    notes              TEXT,
+    created_by         INT NOT NULL REFERENCES users(user_id),
+    created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_opp_qualifications_opp ON opportunity_qualifications(opp_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_opp_qualifications_company_id ON opportunity_qualifications(company_id);
+
+-- ── Capture Management (pre-RFP competitive intel & relationships) ──────
+-- One evolving record per opportunity (UNIQUE opp_id, upsert-style) —
+-- same shape as expro_feasibility. Attaches to an existing opportunity
+-- row rather than a separate pre-opportunity "lead" object.
+CREATE TABLE IF NOT EXISTS opportunity_capture (
+    capture_id              SERIAL PRIMARY KEY,
+    opp_id                  INT NOT NULL REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    company_id               INT NOT NULL REFERENCES companies(company_id),
+    capture_strategy         TEXT,                 -- overall approach to win
+    customer_priorities       TEXT,                 -- what the customer actually cares about
+    relationship_strength    VARCHAR(20) DEFAULT 'UNKNOWN', -- UNKNOWN | WEAK | DEVELOPING | STRONG | CHAMPION
+    key_contacts              TEXT,                 -- JSON-encoded [{name,title,notes}]
+    competitors                TEXT,                 -- JSON-encoded [{name,strengths,weaknesses}]
+    incumbent_name            VARCHAR(200),
+    incumbent_notes           TEXT,
+    teaming_partners           TEXT,                 -- JSON-encoded [{name,role}]
+    budget_confirmed          BOOLEAN DEFAULT FALSE,
+    procurement_process_notes TEXT,
+    capture_status             VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | ON_HOLD | CLOSED
+    notes                      TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW(),
+    created_by                  INT REFERENCES users(user_id),
+    UNIQUE (opp_id)
+);
+CREATE INDEX IF NOT EXISTS idx_opp_capture_company_id ON opportunity_capture(company_id);
+
+-- ── Color Team Reviews (Pink/Red/Gold proposal review gates) ────────────
+-- One row per review instance — same multi-row-per-stage shape as
+-- opportunity_approvals, but this is proposal-quality review, not the
+-- financial/maker-checker approval chain, so it's a separate table with
+-- no shared status machine or gating between the two.
+CREATE TABLE IF NOT EXISTS opportunity_color_reviews (
+    review_id        SERIAL PRIMARY KEY,
+    opp_id            INT NOT NULL REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    company_id        INT NOT NULL REFERENCES companies(company_id),
+    review_type       VARCHAR(10) NOT NULL,   -- PINK | RED | GOLD
+    status            VARCHAR(20) NOT NULL DEFAULT 'SCHEDULED', -- SCHEDULED | IN_PROGRESS | COMPLETED | SKIPPED
+    scheduled_date    DATE,
+    completed_date    DATE,
+    reviewers         TEXT,                   -- comma-separated names/emails
+    rating            VARCHAR(20),             -- PASS | PASS_WITH_COMMENTS | FAIL (set on completion)
+    strengths         TEXT,
+    weaknesses        TEXT,
+    action_items      TEXT,                   -- JSON-encoded [{item,owner,done}]
+    comments          TEXT,
+    is_locked         BOOLEAN DEFAULT FALSE,
+    created_by        INT REFERENCES users(user_id),
+    completed_by      INT REFERENCES users(user_id),
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_opp_color_reviews_opp ON opportunity_color_reviews(opp_id);
+CREATE INDEX IF NOT EXISTS idx_opp_color_reviews_company_id ON opportunity_color_reviews(company_id);
+
+-- ── Win Themes (per-opportunity value proposition / discriminators) ─────
+-- Multi-row, sort_order-based — same shape as opportunity_requirements.
+CREATE TABLE IF NOT EXISTS opportunity_win_themes (
+    theme_id                SERIAL PRIMARY KEY,
+    opp_id                   INT NOT NULL REFERENCES opportunities_v2(opp_id) ON DELETE CASCADE,
+    company_id                INT NOT NULL REFERENCES companies(company_id),
+    theme_title                VARCHAR(200) NOT NULL,
+    customer_need              TEXT,          -- the customer pain point / requirement this addresses
+    our_strength                TEXT,          -- our discriminator / capability that addresses it
+    proof_points                 TEXT,          -- evidence — past performance, certifications, references
+    competitive_advantage      TEXT,          -- why this beats the likely competition specifically
+    sort_order                  INT NOT NULL DEFAULT 0,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW(),
+    created_by                  INT REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_opp_win_themes_opp_id ON opportunity_win_themes(opp_id);
+CREATE INDEX IF NOT EXISTS idx_opp_win_themes_company_id ON opportunity_win_themes(company_id);
