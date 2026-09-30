@@ -14,12 +14,14 @@ def _esc(value) -> str:
     escaped here or it renders as live HTML in a real inbox."""
     return html.escape(str(value)) if value is not None else ""
 
-async def _get_smtp_config() -> dict:
+async def _get_smtp_config(company_id: int) -> dict:
     try:
         from app.db.postgres import get_raw_connection
         conn = await get_raw_connection()
         try:
-            rows = await conn.fetch("SELECT setting_key,setting_value FROM system_settings WHERE category='EMAIL' AND company_id=1")
+            rows = await conn.fetch(
+                "SELECT setting_key,setting_value FROM system_settings WHERE category='EMAIL' AND company_id=$1",
+                company_id)
             cfg = {r['setting_key']:r['setting_value'] for r in rows}
         finally:
             await conn.close()
@@ -36,9 +38,9 @@ async def _get_smtp_config() -> dict:
         "enabled":    (cfg.get("email_enabled","false")).lower()=="true",
     }
 
-async def send_email(to: str, subject: str, body_html: str, body_text: str = "") -> bool:
+async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1) -> bool:
     try:
-        smtp = await _get_smtp_config()
+        smtp = await _get_smtp_config(company_id)
     except Exception:
         smtp = {"host":settings.SMTP_HOST or "","port":settings.SMTP_PORT or 587,
                 "user":settings.SMTP_USER or "","password":settings.SMTP_PASSWORD or "",
@@ -63,7 +65,7 @@ async def send_email(to: str, subject: str, body_html: str, body_text: str = "")
         logger.error(f"Failed to send email to {to}: {e}")
         return False
 
-async def send_otp_email(to: str, full_name: str, otp_code: str) -> bool:
+async def send_otp_email(to: str, full_name: str, otp_code: str, company_id: int) -> bool:
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:20px">
       <div style="background:#1e4080;padding:20px;border-radius:12px 12px 0 0;text-align:center">
@@ -82,9 +84,9 @@ async def send_otp_email(to: str, full_name: str, otp_code: str) -> bool:
         <p style="color:#9ca3af;font-size:11px;text-align:center">TeleBid Enterprise · Secure Procurement Platform</p>
       </div>
     </div>"""
-    return await send_email(to, "Your TeleBid Login Code", html, f"Your OTP code is: {otp_code}")
+    return await send_email(to, "Your TeleBid Login Code", html, f"Your OTP code is: {otp_code}", company_id=company_id)
 
-async def send_bid_notification(to: str, full_name: str, subject: str, message: str, bid_number: str = "") -> bool:
+async def send_bid_notification(to: str, full_name: str, subject: str, message: str, bid_number: str = "", company_id: int = 1) -> bool:
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:20px">
       <div style="background:#1e4080;padding:20px;border-radius:12px 12px 0 0;text-align:center">
@@ -97,9 +99,9 @@ async def send_bid_notification(to: str, full_name: str, subject: str, message: 
         <p style="color:#6b7280;font-size:12px">Login to TeleBid Enterprise to view details.</p>
       </div>
     </div>"""
-    return await send_email(to, subject, html, message)
+    return await send_email(to, subject, html, message, company_id=company_id)
 
-async def send_deadline_reminder(to: str, full_name: str, bid_number: str, bid_title: str, days_left: int) -> bool:
+async def send_deadline_reminder(to: str, full_name: str, bid_number: str, bid_title: str, days_left: int, company_id: int = 1) -> bool:
     urgency = "🔴 URGENT" if days_left <= 2 else "🟡 Reminder"
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:20px">
@@ -117,10 +119,11 @@ async def send_deadline_reminder(to: str, full_name: str, bid_number: str, bid_t
         <p style="color:#6b7280;font-size:12px">Please take action immediately in TeleBid Enterprise.</p>
       </div>
     </div>"""
-    return await send_email(to, f"{urgency}: {bid_number} — {days_left} days left", html)
+    return await send_email(to, f"{urgency}: {bid_number} — {days_left} days left", html, company_id=company_id)
 
 async def send_bond_reminder(to: str, full_name: str, opp_number: str, customer_name: str,
-                              submission_deadline: str, days_left: int, role: str = "BID_PERSON") -> bool:
+                              submission_deadline: str, days_left: int, role: str = "BID_PERSON",
+                              company_id: int = 1) -> bool:
     """Send bid bond reminder — fires 6 days before submission deadline."""
     if role == "MANAGER":
         subject = f"⚠️ Bond Request Required: {opp_number} — {days_left} Days to Deadline"
@@ -172,7 +175,7 @@ async def send_bond_reminder(to: str, full_name: str, opp_number: str, customer_
     </div>"""
 
     text = f"Bond reminder for {opp_number} - {customer_name}. Submission deadline: {submission_deadline}. {days_left} days remaining. {action_text}"
-    return await send_email(to, subject, html, text)
+    return await send_email(to, subject, html, text, company_id=company_id)
 
 
 SEVERITY_STYLE = {
@@ -184,7 +187,8 @@ SEVERITY_STYLE = {
 
 async def send_ai_alert_email(to: str, full_name: str, headline: str, reason: str,
                                recommended_action: str, severity: str, opp_number: str,
-                               customer_name: str, ai_generated: bool = True) -> bool:
+                               customer_name: str, ai_generated: bool = True,
+                               company_id: int = 1) -> bool:
     """AI Alert Watchdog email — delivered through the standard SMTP pipeline
     above, which can be pointed at Outlook/Office 365's SMTP relay via
     SMTP_HOST=smtp.office365.com (see .env / system_settings EMAIL category)."""
@@ -223,4 +227,4 @@ async def send_ai_alert_email(to: str, full_name: str, headline: str, reason: st
       </div>
     </div>"""
     text = f"{headline}\n\n{opp_number} — {customer_name}\n\nWhy: {reason}\n\nRecommended action: {recommended_action}"
-    return await send_email(to, f"[TeleBid Alert] {headline}", html, text)
+    return await send_email(to, f"[TeleBid Alert] {headline}", html, text, company_id=company_id)

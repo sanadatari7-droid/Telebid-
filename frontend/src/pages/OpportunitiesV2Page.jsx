@@ -12,7 +12,8 @@ import {
   Download, Eye, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw,
   Users, MessageSquare, Settings2, Microscope, UserCheck, X, Send,
   Check, MoreHorizontal, Trash2, Reply, Lock, Calendar, User, Building2, Bell,
-  Sparkles, ThumbsUp, ThumbsDown, HelpCircle, Calculator, ListChecks, Wand2
+  Sparkles, ThumbsUp, ThumbsDown, HelpCircle, Calculator, ListChecks, Wand2,
+  ClipboardCheck, Target, Palette, Award
 } from "lucide-react"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -773,6 +774,28 @@ const AI_REC_STYLE = {
   CONDITIONAL_BID: { icon: HelpCircle, badge: "badge-amber", label: "CONDITIONAL BID" },
 }
 
+// Shared by AiAdvisorPanel and QualificationPanel (the human qualification
+// form shows this as a read-only reference alongside its own scoring).
+function WinProbabilityBar({ value }) {
+  if (value == null) return null
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-semibold text-gray-600">Estimated Win Probability</span>
+        <span className={clsx("text-sm font-bold",
+          value>=60?"text-green-600":value>=35?"text-amber-600":"text-red-600")}>
+          {value}%
+        </span>
+      </div>
+      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={clsx("h-full rounded-full",
+            value>=60?"bg-green-500":value>=35?"bg-amber-500":"bg-red-500")}
+          style={{ width: `${value}%` }}/>
+      </div>
+    </div>
+  )
+}
+
 function AiAdvisorPanel({ oppId }) {
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({
@@ -835,22 +858,7 @@ function AiAdvisorPanel({ oppId }) {
             </span>
             <span className="text-xs text-gray-400">{rec.confidence}% confidence in this call</span>
           </div>
-          {rec.win_probability != null && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-semibold text-gray-600">Estimated Win Probability</span>
-                <span className={clsx("text-sm font-bold",
-                  rec.win_probability>=60?"text-green-600":rec.win_probability>=35?"text-amber-600":"text-red-600")}>
-                  {rec.win_probability}%
-                </span>
-              </div>
-              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div className={clsx("h-full rounded-full",
-                    rec.win_probability>=60?"bg-green-500":rec.win_probability>=35?"bg-amber-500":"bg-red-500")}
-                  style={{ width: `${rec.win_probability}%` }}/>
-              </div>
-            </div>
-          )}
+          <WinProbabilityBar value={rec.win_probability}/>
           <p className="text-sm text-gray-700">{rec.reasoning}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -873,6 +881,454 @@ function AiAdvisorPanel({ oppId }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Formal Bid/No-Bid Qualification ───────────────────────────────────────────
+const QUALIFICATION_CRITERIA = [
+  ["score_customer_relationship", "Customer Relationship", "20%"],
+  ["score_competitive_position",  "Competitive Position",  "20%"],
+  ["score_technical_fit",         "Technical Fit",         "20%"],
+  ["score_financial_value",       "Financial Value",       "15%"],
+  ["score_resource_availability", "Resource Availability", "15%"],
+  ["score_strategic_fit",         "Strategic Fit",         "10%"],
+]
+const QUALIFICATION_WEIGHTS = { score_customer_relationship:.20, score_competitive_position:.20, score_technical_fit:.20,
+  score_financial_value:.15, score_resource_availability:.15, score_strategic_fit:.10 }
+
+function QualificationPanel({ oppId }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ["opp-qualification", oppId],
+    queryFn: () => oppsV2Api.getQualification(oppId).then(r => r.data),
+  })
+  const { data: aiData } = useQuery({
+    queryKey: ["opp-ai-recommendation", oppId],
+    queryFn: () => oppsV2Api.getAiRecommendation(oppId).then(r => r.data),
+  })
+  const [scores, setScores] = useState(() => Object.fromEntries(QUALIFICATION_CRITERIA.map(([k])=>[k,3])))
+  const [recommendation, setRecommendation] = useState("CONDITIONAL_BID")
+  const [notes, setNotes] = useState("")
+
+  const submitMut = useMutation({
+    mutationFn: () => oppsV2Api.submitQualification(oppId, { ...scores, recommendation, notes }),
+    onSuccess: () => { toast.success("Qualification recorded"); setNotes(""); qc.invalidateQueries({queryKey:["opp-qualification",oppId]}); qc.invalidateQueries({queryKey:["opp-v2-detail",oppId]}) },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to save qualification")),
+  })
+
+  if (isLoading) return <div className="space-y-3">{[1,2].map(i=><div key={i} className="skeleton h-16"/>)}</div>
+
+  const liveTotal = Math.round(QUALIFICATION_CRITERIA.reduce((sum,[k])=>sum + (scores[k]/5)*QUALIFICATION_WEIGHTS[k], 0) * 100)
+  const latest = data?.latest
+  const history = data?.history || []
+  const aiRec = aiData?.latest
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+        <ClipboardCheck size={15} className="text-primary-600"/> Bid/No-Bid Qualification
+      </div>
+
+      {/* AI Advisor reference card — read-only */}
+      <div className="card-sm">
+        <div className="text-xs font-semibold text-gray-500 mb-2">AI Advisor Reference</div>
+        {aiData?.available === false ? (
+          <p className="text-xs text-gray-400">AI Advisor not configured on this server.</p>
+        ) : aiRec ? (
+          <WinProbabilityBar value={aiRec.win_probability}/>
+        ) : (
+          <p className="text-xs text-gray-400">No AI recommendation generated yet — see the AI Advisor tab.</p>
+        )}
+      </div>
+
+      {/* Scoring form */}
+      <div className="card-sm space-y-3">
+        <div className="section-title">Score Each Criterion (0 = worst fit, 5 = best fit)</div>
+        {QUALIFICATION_CRITERIA.map(([key,label,weight]) => (
+          <div key={key} className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-700 flex-1">{label} <span className="text-gray-400 text-xs">({weight})</span></span>
+            <div className="flex gap-1">
+              {[0,1,2,3,4,5].map(n => (
+                <button key={n} onClick={()=>setScores(p=>({...p,[key]:n}))}
+                  className={clsx("w-7 h-7 rounded-lg text-xs font-semibold transition-colors",
+                    scores[key]===n ? "bg-blue-600 text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100")}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div className="flex items-center justify-between pt-2 border-t">
+          <span className="text-sm font-semibold text-gray-700">Weighted Total</span>
+          <span className={clsx("text-lg font-bold",
+            liveTotal>=70?"text-green-600":liveTotal>=40?"text-amber-600":"text-red-600")}>{liveTotal}/100</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[["BID","Bid","bg-green-500"],["CONDITIONAL_BID","Conditional","bg-amber-500"],["NO_BID","No-Bid","bg-red-500"]].map(([v,l,c])=>(
+            <button key={v} onClick={()=>setRecommendation(v)}
+              className={clsx("p-2.5 rounded-xl font-semibold text-sm transition-all",
+                recommendation===v?"text-white "+c:"bg-gray-50 text-gray-500 hover:bg-gray-100")}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <div>
+          <label className="label">Notes</label>
+          <textarea className="input" rows={2} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Rationale for this decision…"/>
+        </div>
+        <button className="btn-primary btn-sm" disabled={submitMut.isPending} onClick={()=>submitMut.mutate()}>
+          {submitMut.isPending?"Saving…":"Save Qualification"}
+        </button>
+      </div>
+
+      {/* History */}
+      {history.length > 0 && (
+        <div className="space-y-2">
+          <div className="section-title">Scoring History</div>
+          {history.map(h => {
+            const style = AI_REC_STYLE[h.recommendation] || AI_REC_STYLE.CONDITIONAL_BID
+            return (
+              <div key={h.qualification_id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-gray-50/50 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className={clsx("badge text-xs flex items-center gap-1",style.badge)}><style.icon size={12}/>{style.label}</span>
+                  <span className="font-semibold">{h.weighted_total}/100</span>
+                </div>
+                <div className="text-xs text-gray-400">{h.scored_by_name} · {fmt(h.created_at,"dd MMM yyyy HH:mm")}</div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {latest && <div className="text-[11px] text-gray-400">Does not block submission for approval — advisory only, like the AI Advisor.</div>}
+    </div>
+  )
+}
+
+// ── Capture Management ────────────────────────────────────────────────────────
+const RELATIONSHIP_LEVELS = ["UNKNOWN","WEAK","DEVELOPING","STRONG","CHAMPION"]
+
+function ListEditor({ items, onChange, fields, addLabel }) {
+  // Repeatable add/remove rows for JSON-list capture fields (key_contacts,
+  // competitors, teaming_partners) — same free-text-row UX used to display
+  // strengths/risks in AiAdvisorPanel, just editable here.
+  const update = (i, k, v) => onChange(items.map((it,idx)=> idx===i ? {...it,[k]:v} : it))
+  const remove = i => onChange(items.filter((_,idx)=>idx!==i))
+  const add = () => onChange([...items, Object.fromEntries(fields.map(f=>[f.key,""]))])
+  return (
+    <div className="space-y-2">
+      {items.map((it,i) => (
+        <div key={i} className="flex items-start gap-2 p-2 bg-gray-50 rounded-lg">
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-2">
+            {fields.map(f => (
+              <input key={f.key} className="input !py-1 !px-2 text-xs" placeholder={f.label}
+                value={it[f.key]||""} onChange={e=>update(i,f.key,e.target.value)}/>
+            ))}
+          </div>
+          <button className="text-gray-300 hover:text-red-500 mt-1" onClick={()=>remove(i)}><Trash2 size={13}/></button>
+        </div>
+      ))}
+      <button className="btn-ghost btn-sm" onClick={add}><Plus size={13}/> {addLabel}</button>
+    </div>
+  )
+}
+
+function parseJsonList(s) { try { const v = s ? JSON.parse(s) : []; return Array.isArray(v) ? v : [] } catch { return [] } }
+
+function CapturePanel({ oppId }) {
+  const qc = useQueryClient()
+  const { data: capture, isLoading } = useQuery({ queryKey:["opp-capture",oppId], queryFn:()=>oppsV2Api.getCapture(oppId).then(r=>r.data), retry:false })
+  const [form, setForm] = useState(null)
+  const [contacts, setContacts] = useState([])
+  const [competitors, setCompetitors] = useState([])
+  const [partners, setPartners] = useState([])
+
+  React.useEffect(() => {
+    if (capture && !form) {
+      setForm({
+        capture_strategy: capture.capture_strategy || "", customer_priorities: capture.customer_priorities || "",
+        relationship_strength: capture.relationship_strength || "UNKNOWN",
+        incumbent_name: capture.incumbent_name || "", incumbent_notes: capture.incumbent_notes || "",
+        budget_confirmed: capture.budget_confirmed || false, procurement_process_notes: capture.procurement_process_notes || "",
+        capture_status: capture.capture_status || "ACTIVE", notes: capture.notes || "",
+      })
+      setContacts(parseJsonList(capture.key_contacts))
+      setCompetitors(parseJsonList(capture.competitors))
+      setPartners(parseJsonList(capture.teaming_partners))
+    } else if (!capture && !form) {
+      setForm({ capture_strategy:"", customer_priorities:"", relationship_strength:"UNKNOWN",
+        incumbent_name:"", incumbent_notes:"", budget_confirmed:false, procurement_process_notes:"",
+        capture_status:"ACTIVE", notes:"" })
+    }
+  }, [capture])
+
+  const saveMut = useMutation({
+    mutationFn: () => oppsV2Api.saveCapture(oppId, {
+      ...form,
+      key_contacts: JSON.stringify(contacts), competitors: JSON.stringify(competitors), teaming_partners: JSON.stringify(partners),
+    }),
+    onSuccess: () => { toast.success("Capture info saved"); qc.invalidateQueries({queryKey:["opp-capture",oppId]}); qc.invalidateQueries({queryKey:["opp-v2-detail",oppId]}) },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to save")),
+  })
+
+  if (isLoading || !form) return <div className="space-y-3">{[1,2].map(i=><div key={i} className="skeleton h-16"/>)}</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold text-gray-700"><Target size={15} className="text-primary-600"/> Capture Management</div>
+        <button className="btn-primary btn-sm" disabled={saveMut.isPending} onClick={()=>saveMut.mutate()}>{saveMut.isPending?"Saving…":"Save"}</button>
+      </div>
+
+      <div className="card-sm space-y-3">
+        <div><label className="label">Capture Strategy</label><textarea className="input" rows={2} value={form.capture_strategy} onChange={e=>setForm(p=>({...p,capture_strategy:e.target.value}))} placeholder="Overall approach to win this pursuit…"/></div>
+        <div><label className="label">Customer Priorities</label><textarea className="input" rows={2} value={form.customer_priorities} onChange={e=>setForm(p=>({...p,customer_priorities:e.target.value}))} placeholder="What the customer actually cares about…"/></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Relationship Strength</label>
+            <select className="input" value={form.relationship_strength} onChange={e=>setForm(p=>({...p,relationship_strength:e.target.value}))}>
+              {RELATIONSHIP_LEVELS.map(l=><option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Capture Status</label>
+            <select className="input" value={form.capture_status} onChange={e=>setForm(p=>({...p,capture_status:e.target.value}))}>
+              {["ACTIVE","ON_HOLD","CLOSED"].map(s=><option key={s} value={s}>{s.replace("_"," ")}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="card-sm space-y-2">
+        <div className="section-title">Key Contacts</div>
+        <ListEditor items={contacts} onChange={setContacts} addLabel="Add Contact"
+          fields={[{key:"name",label:"Name"},{key:"title",label:"Title"},{key:"notes",label:"Notes"}]}/>
+      </div>
+
+      <div className="card-sm space-y-2">
+        <div className="section-title">Competitors</div>
+        <ListEditor items={competitors} onChange={setCompetitors} addLabel="Add Competitor"
+          fields={[{key:"name",label:"Name"},{key:"strengths",label:"Their Strengths"},{key:"weaknesses",label:"Their Weaknesses"}]}/>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <input className="input" placeholder="Incumbent name" value={form.incumbent_name} onChange={e=>setForm(p=>({...p,incumbent_name:e.target.value}))}/>
+          <input className="input" placeholder="Incumbent notes" value={form.incumbent_notes} onChange={e=>setForm(p=>({...p,incumbent_notes:e.target.value}))}/>
+        </div>
+      </div>
+
+      <div className="card-sm space-y-2">
+        <div className="section-title">Teaming Partners</div>
+        <ListEditor items={partners} onChange={setPartners} addLabel="Add Partner"
+          fields={[{key:"name",label:"Name"},{key:"role",label:"Role"}]}/>
+      </div>
+
+      <div className="card-sm space-y-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.budget_confirmed} onChange={e=>setForm(p=>({...p,budget_confirmed:e.target.checked}))}/>
+          Budget confirmed
+        </label>
+        <div><label className="label">Procurement Process Notes</label><textarea className="input" rows={2} value={form.procurement_process_notes} onChange={e=>setForm(p=>({...p,procurement_process_notes:e.target.value}))}/></div>
+        <div><label className="label">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))}/></div>
+      </div>
+    </div>
+  )
+}
+
+// ── Color Team Reviews (Pink/Red/Gold) ────────────────────────────────────────
+const COLOR_REVIEW_TYPES = [
+  ["PINK","Pink Team","bg-pink-500","bg-pink-50 border-pink-200"],
+  ["RED","Red Team","bg-red-500","bg-red-50 border-red-200"],
+  ["GOLD","Gold Team","bg-amber-500","bg-amber-50 border-amber-200"],
+]
+const RATING_STYLE = {
+  PASS: "bg-green-50 border-green-200", PASS_WITH_COMMENTS: "bg-amber-50 border-amber-200", FAIL: "bg-red-50 border-red-200",
+}
+
+function ColorReviewsPanel({ oppId }) {
+  const qc = useQueryClient()
+  const { data: reviews, isLoading } = useQuery({ queryKey:["opp-color-reviews",oppId], queryFn:()=>oppsV2Api.getColorReviews(oppId).then(r=>r.data) })
+  const invalidate = () => { qc.invalidateQueries({queryKey:["opp-color-reviews",oppId]}); qc.invalidateQueries({queryKey:["opp-v2-detail",oppId]}) }
+
+  const [scheduling, setScheduling] = useState(null) // review_type being scheduled, or null
+  const [scheduleForm, setScheduleForm] = useState({scheduled_date:"",reviewers:""})
+  const scheduleMut = useMutation({
+    mutationFn: () => oppsV2Api.scheduleColorReview(oppId, {
+      review_type: scheduling, ...scheduleForm,
+      scheduled_date: scheduleForm.scheduled_date || null,
+    }),
+    onSuccess: () => { toast.success("Review scheduled"); setScheduling(null); setScheduleForm({scheduled_date:"",reviewers:""}); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to schedule review")),
+  })
+
+  const [completing, setCompleting] = useState(null) // review row being completed, or null
+  const [completeForm, setCompleteForm] = useState({rating:"PASS",strengths:"",weaknesses:"",action_items:"",comments:""})
+  const completeMut = useMutation({
+    mutationFn: () => oppsV2Api.completeColorReview(oppId, completing.review_id, completeForm),
+    onSuccess: () => { toast.success("Review completed"); setCompleting(null); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to complete review")),
+  })
+  const deleteMut = useMutation({ mutationFn: reviewId => oppsV2Api.deleteColorReview(oppId, reviewId), onSuccess: invalidate })
+
+  if (isLoading) return <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="skeleton h-16"/>)}</div>
+  const items = reviews || []
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-700"><Palette size={15} className="text-primary-600"/> Color Team Reviews</div>
+
+      {COLOR_REVIEW_TYPES.map(([type,label,dot,cardBg]) => {
+        const typeReviews = items.filter(r=>r.review_type===type)
+        return (
+          <div key={type} className="card-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold"><span className={clsx("w-3 h-3 rounded-full",dot)}/>{label}</div>
+              <button className="btn-ghost btn-sm" onClick={()=>setScheduling(type)}><Plus size={13}/> Schedule</button>
+            </div>
+            {typeReviews.length === 0 && <div className="text-xs text-gray-400 py-2">No {label.toLowerCase()} scheduled yet.</div>}
+            {typeReviews.map(r => (
+              <div key={r.review_id} className={clsx("p-3 rounded-xl border text-sm", r.rating ? RATING_STYLE[r.rating] : cardBg)}>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{r.status.replace("_"," ")}{r.rating ? ` — ${r.rating.replace(/_/g," ")}` : ""}</span>
+                  <div className="flex items-center gap-2">
+                    {r.is_locked && <Lock size={11} className="text-gray-400"/>}
+                    {!r.is_locked && (
+                      <>
+                        <button className="btn-secondary btn-sm !py-0.5 !px-2 text-xs" onClick={()=>{setCompleting(r); setCompleteForm({rating:"PASS",strengths:"",weaknesses:"",action_items:"",comments:""})}}>Complete</button>
+                        <button className="text-gray-300 hover:text-red-500" onClick={()=>deleteMut.mutate(r.review_id)}><Trash2 size={13}/></button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {r.scheduled_date && <div className="text-xs text-gray-400 mt-1">Scheduled: {fmt(r.scheduled_date)}{r.reviewers ? ` · ${r.reviewers}` : ""}</div>}
+                {r.strengths && <div className="text-xs mt-1"><span className="font-semibold">Strengths:</span> {r.strengths}</div>}
+                {r.weaknesses && <div className="text-xs mt-1"><span className="font-semibold">Weaknesses:</span> {r.weaknesses}</div>}
+                {r.comments && <div className="text-xs italic mt-1 text-gray-600">"{r.comments}"</div>}
+              </div>
+            ))}
+          </div>
+        )
+      })}
+
+      {/* Schedule sub-modal */}
+      {scheduling && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-5 border-b"><h2 className="font-bold">Schedule {scheduling} Team Review</h2></div>
+            <div className="p-5 space-y-3">
+              <div><label className="label">Scheduled Date</label><input type="date" className="input" value={scheduleForm.scheduled_date} onChange={e=>setScheduleForm(p=>({...p,scheduled_date:e.target.value}))}/></div>
+              <div><label className="label">Reviewers</label><input className="input" placeholder="Names or emails, comma-separated" value={scheduleForm.reviewers} onChange={e=>setScheduleForm(p=>({...p,reviewers:e.target.value}))}/></div>
+              <div className="flex gap-2 justify-end pt-2">
+                <button className="btn-secondary" onClick={()=>setScheduling(null)}>Cancel</button>
+                <button className="btn-primary" disabled={scheduleMut.isPending} onClick={()=>scheduleMut.mutate()}>{scheduleMut.isPending?"Saving…":"Schedule"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Complete sub-modal — same structure as the approval decision sub-modal */}
+      {completing && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-5 border-b"><h2 className="font-bold">Complete {completing.review_type} Team Review</h2></div>
+            <div className="p-5 space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                {[["PASS","Pass","bg-green-500"],["PASS_WITH_COMMENTS","Pass w/ Comments","bg-amber-500"],["FAIL","Fail","bg-red-500"]].map(([v,l,c])=>(
+                  <button key={v} onClick={()=>setCompleteForm(p=>({...p,rating:v}))}
+                    className={clsx("p-2.5 rounded-xl font-semibold text-xs transition-all",
+                      completeForm.rating===v?"text-white "+c:"bg-gray-50 text-gray-500 hover:bg-gray-100")}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div><label className="label">Strengths</label><textarea className="input" rows={2} value={completeForm.strengths} onChange={e=>setCompleteForm(p=>({...p,strengths:e.target.value}))}/></div>
+              <div><label className="label">Weaknesses</label><textarea className="input" rows={2} value={completeForm.weaknesses} onChange={e=>setCompleteForm(p=>({...p,weaknesses:e.target.value}))}/></div>
+              <div><label className="label">Comments</label><textarea className="input" rows={2} value={completeForm.comments} onChange={e=>setCompleteForm(p=>({...p,comments:e.target.value}))}/></div>
+              <div className="alert-warning text-xs">This decision will be locked and cannot be changed.</div>
+              <div className="flex gap-2 justify-end">
+                <button className="btn-secondary" onClick={()=>setCompleting(null)}>Cancel</button>
+                <button className="btn-primary" disabled={completeMut.isPending} onClick={()=>completeMut.mutate()}>{completeMut.isPending?"Saving…":"Confirm"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Win Themes ─────────────────────────────────────────────────────────────
+function WinThemesPanel({ oppId }) {
+  const qc = useQueryClient()
+  const { data: themes, isLoading } = useQuery({ queryKey:["opp-win-themes",oppId], queryFn:()=>oppsV2Api.getWinThemes(oppId).then(r=>r.data) })
+  const invalidate = () => qc.invalidateQueries({queryKey:["opp-win-themes",oppId]})
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState({theme_title:"",customer_need:"",our_strength:"",proof_points:"",competitive_advantage:""})
+
+  const addMut = useMutation({
+    mutationFn: () => oppsV2Api.addWinTheme(oppId, form),
+    onSuccess: () => { toast.success("Win theme added"); setForm({theme_title:"",customer_need:"",our_strength:"",proof_points:"",competitive_advantage:""}); setShowAdd(false); invalidate() },
+    onError: e => toast.error(apiErrorMessage(e, "Failed to add win theme")),
+  })
+  const updateMut = useMutation({
+    mutationFn: ({themeId,patch}) => oppsV2Api.updateWinTheme(oppId, themeId, patch),
+    onSuccess: invalidate,
+  })
+  const deleteMut = useMutation({ mutationFn: themeId => oppsV2Api.deleteWinTheme(oppId, themeId), onSuccess: invalidate })
+
+  const move = (theme, dir) => {
+    const items = themes || []
+    const idx = items.findIndex(t=>t.theme_id===theme.theme_id)
+    const swapWith = items[idx+dir]
+    if (!swapWith) return
+    updateMut.mutate({ themeId: theme.theme_id, patch: { sort_order: swapWith.sort_order } })
+    updateMut.mutate({ themeId: swapWith.theme_id, patch: { sort_order: theme.sort_order } })
+  }
+
+  if (isLoading) return <div className="space-y-3">{[1,2].map(i=><div key={i} className="skeleton h-16"/>)}</div>
+  const items = themes || []
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold text-gray-700"><Award size={15} className="text-primary-600"/> Win Themes</div>
+        <button className="btn-secondary btn-sm" onClick={()=>setShowAdd(s=>!s)}>{showAdd ? "Cancel" : <><Plus size={13}/> Add Win Theme</>}</button>
+      </div>
+
+      {showAdd && (
+        <div className="card-sm space-y-2">
+          <input className="input" placeholder="Theme title" value={form.theme_title} onChange={e=>setForm(p=>({...p,theme_title:e.target.value}))}/>
+          <textarea className="input" rows={2} placeholder="Customer need this addresses" value={form.customer_need} onChange={e=>setForm(p=>({...p,customer_need:e.target.value}))}/>
+          <textarea className="input" rows={2} placeholder="Our strength / discriminator" value={form.our_strength} onChange={e=>setForm(p=>({...p,our_strength:e.target.value}))}/>
+          <textarea className="input" rows={2} placeholder="Proof points (past performance, certifications, references)" value={form.proof_points} onChange={e=>setForm(p=>({...p,proof_points:e.target.value}))}/>
+          <textarea className="input" rows={2} placeholder="Why this beats the competition" value={form.competitive_advantage} onChange={e=>setForm(p=>({...p,competitive_advantage:e.target.value}))}/>
+          <button className="btn-primary btn-sm" disabled={!form.theme_title.trim() || addMut.isPending} onClick={()=>addMut.mutate()}>
+            {addMut.isPending?"Saving…":"Add Theme"}
+          </button>
+        </div>
+      )}
+
+      {items.length === 0 && !showAdd && (
+        <div className="empty-state py-8"><div className="empty-icon mx-auto"><Award size={24}/></div><p className="text-sm text-gray-400">No win themes yet</p></div>
+      )}
+
+      {items.map((t,i) => (
+        <div key={t.theme_id} className="card-sm">
+          <div className="flex items-start justify-between">
+            <div className="font-semibold text-sm text-gray-900">{t.theme_title}</div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button className="text-gray-300 hover:text-gray-600 disabled:opacity-30" disabled={i===0} onClick={()=>move(t,-1)}><ChevronLeft size={14} className="rotate-90"/></button>
+              <button className="text-gray-300 hover:text-gray-600 disabled:opacity-30" disabled={i===items.length-1} onClick={()=>move(t,1)}><ChevronRight size={14} className="rotate-90"/></button>
+              <button className="text-gray-300 hover:text-red-500" onClick={()=>deleteMut.mutate(t.theme_id)}><Trash2 size={13}/></button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-xs">
+            {t.customer_need && <InfoRow label="Need" value={t.customer_need}/>}
+            {t.our_strength && <InfoRow label="Strength" value={t.our_strength}/>}
+            {t.proof_points && <InfoRow label="Proof" value={t.proof_points}/>}
+            {t.competitive_advantage && <InfoRow label="Advantage" value={t.competitive_advantage}/>}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1052,12 +1508,16 @@ function DetailModal({ oppId, onClose }) {
   const opp = detail?.opportunity
   const TABS = [
     { id:"overview", label:"Overview", icon: FileText },
+    { id:"qualification", label:"Qualification", icon: ClipboardCheck },
     { id:"team", label:"Team", icon: Users },
     { id:"feasibility", label:"Feasibility", icon: Microscope },
+    { id:"capture", label:"Capture", icon: Target },
     { id:"costing", label:"Costing", icon: Calculator },
     { id:"compliance", label:"Compliance", icon: ListChecks },
+    { id:"win-themes", label:"Win Themes", icon: Award },
     { id:"questions", label:`Questions${opp?.questions_open>0?` (${opp.questions_open})`:opp?.questions_count>0?` (${opp.questions_count})`:""}`, icon: MessageSquare },
     { id:"approvals", label:"Approvals", icon: CheckCircle2 },
+    { id:"color-reviews", label:"Color Reviews", icon: Palette },
     { id:"ai", label:"AI Advisor", icon: Sparkles },
     { id:"log", label:"Log", icon: Clock },
   ]
@@ -1218,9 +1678,12 @@ function DetailModal({ oppId, onClose }) {
                 </div>
               )}
 
+              {activeTab === "qualification" && <QualificationPanel oppId={oppId}/>}
               {activeTab === "feasibility" && <FeasibilityPanel oppId={oppId}/>}
+              {activeTab === "capture" && <CapturePanel oppId={oppId}/>}
               {activeTab === "costing" && <CostingPanel oppId={oppId}/>}
               {activeTab === "compliance" && <CompliancePanel oppId={oppId}/>}
+              {activeTab === "win-themes" && <WinThemesPanel oppId={oppId}/>}
               {activeTab === "questions" && <QuestionsPanel oppId={oppId}/>}
 
               {/* ── Bond Requirement Notice ─────────────────────── */}
@@ -1273,6 +1736,7 @@ function DetailModal({ oppId, onClose }) {
                 </div>
               )}
 
+              {activeTab === "color-reviews" && <ColorReviewsPanel oppId={oppId}/>}
               {activeTab === "ai" && <AiAdvisorPanel oppId={oppId}/>}
 
               {activeTab === "log" && (

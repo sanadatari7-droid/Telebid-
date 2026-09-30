@@ -156,6 +156,67 @@ class RequirementCreate(BaseModel):
     requirement_text: str
     category: str = "Other"
 
+class QualificationCreate(BaseModel):
+    score_customer_relationship: int = Field(..., ge=0, le=5)
+    score_competitive_position: int = Field(..., ge=0, le=5)
+    score_technical_fit: int = Field(..., ge=0, le=5)
+    score_financial_value: int = Field(..., ge=0, le=5)
+    score_resource_availability: int = Field(..., ge=0, le=5)
+    score_strategic_fit: int = Field(..., ge=0, le=5)
+    recommendation: str  # BID | NO_BID | CONDITIONAL_BID
+    notes: Optional[str] = None
+
+    @validator("recommendation")
+    def _valid_recommendation(cls, v):
+        if v not in {"BID", "NO_BID", "CONDITIONAL_BID"}:
+            raise ValueError("recommendation must be BID, NO_BID, or CONDITIONAL_BID")
+        return v
+
+class CaptureUpdate(BaseModel):
+    capture_strategy: Optional[str] = None
+    customer_priorities: Optional[str] = None
+    relationship_strength: Optional[str] = "UNKNOWN"  # UNKNOWN|WEAK|DEVELOPING|STRONG|CHAMPION
+    key_contacts: Optional[str] = None       # JSON-encoded [{name,title,notes}]
+    competitors: Optional[str] = None        # JSON-encoded [{name,strengths,weaknesses}]
+    incumbent_name: Optional[str] = None
+    incumbent_notes: Optional[str] = None
+    teaming_partners: Optional[str] = None   # JSON-encoded [{name,role}]
+    budget_confirmed: bool = False
+    procurement_process_notes: Optional[str] = None
+    capture_status: Optional[str] = "ACTIVE"  # ACTIVE|ON_HOLD|CLOSED
+    notes: Optional[str] = None
+
+class ColorReviewCreate(BaseModel):
+    review_type: str  # PINK | RED | GOLD
+    scheduled_date: Optional[date] = None
+    reviewers: Optional[str] = None
+
+    @validator("review_type")
+    def _valid_type(cls, v):
+        if v not in {"PINK", "RED", "GOLD"}:
+            raise ValueError("review_type must be PINK, RED, or GOLD")
+        return v
+
+class ColorReviewComplete(BaseModel):
+    rating: str  # PASS | PASS_WITH_COMMENTS | FAIL
+    strengths: Optional[str] = None
+    weaknesses: Optional[str] = None
+    action_items: Optional[str] = None  # JSON-encoded [{item,owner,done}]
+    comments: Optional[str] = None
+
+    @validator("rating")
+    def _valid_rating(cls, v):
+        if v not in {"PASS", "PASS_WITH_COMMENTS", "FAIL"}:
+            raise ValueError("rating must be PASS, PASS_WITH_COMMENTS, or FAIL")
+        return v
+
+class WinThemeCreate(BaseModel):
+    theme_title: str = Field(..., max_length=200)
+    customer_need: Optional[str] = None
+    our_strength: Optional[str] = None
+    proof_points: Optional[str] = None
+    competitive_advantage: Optional[str] = None
+
 class QuestionAnswer(BaseModel):
     response: str
 
@@ -179,10 +240,13 @@ class RefConfigUpdate(BaseModel):
 async def _gen_opp_number(conn) -> str:
     # Globally sequential (not per-tenant) — same documented tradeoff as
     # bid_number in bids.py: still globally unique, just won't restart at
-    # 00001 for each new tenant.
+    # 00001 for each new tenant. Backed by opp_number_seq (see main.py's
+    # run_migrations) rather than SELECT COUNT(*)+1: two concurrent requests
+    # reading the same count could both compute the same number and one
+    # would fail with a UniqueViolationError; nextval() is atomic.
     year = datetime.now().year
-    count = await fetch_val(conn, "SELECT COUNT(*) FROM opportunities_v2") or 0
-    return f"OPP-{year}-{str(count+1).zfill(5)}"
+    n = await fetch_val(conn, "SELECT nextval('opp_number_seq')")
+    return f"OPP-{year}-{str(n).zfill(5)}"
 
 async def _own_opp_or_404(conn, opp_id: int, company_id: int):
     ok = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
@@ -709,6 +773,216 @@ async def generate_ai_recommendation(opp_id: int, conn=Depends(get_db), current_
         comments=f"{result['recommendation']} ({result['confidence']}% confidence)")
     return {"available": True, "latest": row}
 
+# ── Formal Bid/No-Bid Qualification (APMP/Shipley-style) ─────────────────────
+# Human-authored counterpart to the AI Advisor above — append-only, same
+# "latest = current, history kept" shape as opp_ai_insights.
+
+_QUALIFICATION_WEIGHTS = {
+    "score_customer_relationship": 0.20,
+    "score_competitive_position": 0.20,
+    "score_technical_fit": 0.20,
+    "score_financial_value": 0.15,
+    "score_resource_availability": 0.15,
+    "score_strategic_fit": 0.10,
+}
+
+@router.get("/{opp_id}/qualification")
+async def get_qualification(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """Latest qualification score plus the full scoring history for this opportunity."""
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    history = await fetch_all(conn, """
+        SELECT q.*, u.full_name AS scored_by_name FROM opportunity_qualifications q
+        LEFT JOIN users u ON q.created_by=u.user_id
+        WHERE q.opp_id=$1 AND q.company_id=$2 ORDER BY q.created_at DESC, q.qualification_id DESC""", opp_id, company_id)
+    return {
+        "criteria": list(_QUALIFICATION_WEIGHTS.keys()),
+        "weights": _QUALIFICATION_WEIGHTS,
+        "latest": history[0] if history else None,
+        "history": history,
+    }
+
+@router.post("/{opp_id}/qualification", status_code=201)
+async def submit_qualification(opp_id: int, body: QualificationCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    scores = {k: getattr(body, k) for k in _QUALIFICATION_WEIGHTS}
+    weighted_total = round(sum(scores[k] / 5 * w for k, w in _QUALIFICATION_WEIGHTS.items()) * 100, 2)
+    row = await fetch_one(conn, """
+        INSERT INTO opportunity_qualifications (
+            opp_id, company_id, score_customer_relationship, score_competitive_position,
+            score_technical_fit, score_financial_value, score_resource_availability,
+            score_strategic_fit, weighted_total, recommendation, notes, created_by
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *""",
+        opp_id, company_id, scores["score_customer_relationship"], scores["score_competitive_position"],
+        scores["score_technical_fit"], scores["score_financial_value"], scores["score_resource_availability"],
+        scores["score_strategic_fit"], weighted_total, body.recommendation, body.notes, current_user.user_id)
+    await _log(conn, opp_id, "QUALIFICATION_SCORED", current_user.user_id,
+        comments=f"{body.recommendation} ({weighted_total}/100)")
+    return row
+
+# ── Capture Management (pre-RFP competitive intel & relationships) ───────────
+
+@router.get("/{opp_id}/capture")
+async def get_capture(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    return await fetch_one(conn, "SELECT * FROM opportunity_capture WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
+
+@router.put("/{opp_id}/capture")
+async def upsert_capture(opp_id: int, body: CaptureUpdate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    row = await fetch_one(conn, """
+        INSERT INTO opportunity_capture (
+            opp_id, company_id, capture_strategy, customer_priorities, relationship_strength,
+            key_contacts, competitors, incumbent_name, incumbent_notes, teaming_partners,
+            budget_confirmed, procurement_process_notes, capture_status, notes, created_by, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
+        ON CONFLICT (opp_id) DO UPDATE SET
+            capture_strategy=EXCLUDED.capture_strategy, customer_priorities=EXCLUDED.customer_priorities,
+            relationship_strength=EXCLUDED.relationship_strength, key_contacts=EXCLUDED.key_contacts,
+            competitors=EXCLUDED.competitors, incumbent_name=EXCLUDED.incumbent_name,
+            incumbent_notes=EXCLUDED.incumbent_notes, teaming_partners=EXCLUDED.teaming_partners,
+            budget_confirmed=EXCLUDED.budget_confirmed, procurement_process_notes=EXCLUDED.procurement_process_notes,
+            capture_status=EXCLUDED.capture_status, notes=EXCLUDED.notes, updated_at=NOW()
+        RETURNING *""",
+        opp_id, company_id, body.capture_strategy, body.customer_priorities, body.relationship_strength,
+        body.key_contacts, body.competitors, body.incumbent_name, body.incumbent_notes, body.teaming_partners,
+        body.budget_confirmed, body.procurement_process_notes, body.capture_status, body.notes, current_user.user_id)
+    await _log(conn, opp_id, "CAPTURE_UPDATED", current_user.user_id)
+    return row
+
+# ── Color Team Reviews (Pink/Red/Gold) ────────────────────────────────────────
+# Separate from the opportunity_approvals maker-checker chain above — these
+# are proposal-quality review gates, not financial sign-off.
+
+@router.get("/{opp_id}/color-reviews")
+async def list_color_reviews(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    return await fetch_all(conn,
+        "SELECT * FROM opportunity_color_reviews WHERE opp_id=$1 AND company_id=$2 ORDER BY scheduled_date NULLS LAST, review_id",
+        opp_id, company_id)
+
+@router.post("/{opp_id}/color-reviews", status_code=201)
+async def schedule_color_review(opp_id: int, body: ColorReviewCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    row = await fetch_one(conn, """
+        INSERT INTO opportunity_color_reviews (opp_id, company_id, review_type, scheduled_date, reviewers, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *""",
+        opp_id, company_id, body.review_type, body.scheduled_date, body.reviewers, current_user.user_id)
+    await _log(conn, opp_id, "COLOR_REVIEW_SCHEDULED", current_user.user_id, comments=f"{body.review_type} review scheduled")
+    return row
+
+@router.patch("/{opp_id}/color-reviews/{review_id}")
+async def update_color_review(opp_id: int, review_id: int, body: dict, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    existing = await fetch_one(conn,
+        "SELECT is_locked FROM opportunity_color_reviews WHERE review_id=$1 AND opp_id=$2 AND company_id=$3",
+        review_id, opp_id, company_id)
+    if not existing: raise HTTPException(status_code=404, detail="Color review not found")
+    if existing["is_locked"]: raise HTTPException(status_code=400, detail="This review has been completed and is locked")
+    allowed = ["scheduled_date", "reviewers", "status"]
+    updates = ["updated_at=NOW()"]
+    args = []
+    for k, v in body.items():
+        if k in allowed:
+            args.append(v); updates.append(f"{k}=${len(args)}")
+    if not args:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    args.append(review_id); args.append(company_id)
+    result = await execute(conn,
+        f"UPDATE opportunity_color_reviews SET {','.join(updates)} WHERE review_id=${len(args)-1} AND company_id=${len(args)}", *args)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Color review not found")
+    return {"message": "Color review updated"}
+
+@router.post("/{opp_id}/color-reviews/{review_id}/complete")
+async def complete_color_review(opp_id: int, review_id: int, body: ColorReviewComplete, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    existing = await fetch_one(conn,
+        "SELECT review_type, is_locked FROM opportunity_color_reviews WHERE review_id=$1 AND opp_id=$2 AND company_id=$3",
+        review_id, opp_id, company_id)
+    if not existing: raise HTTPException(status_code=404, detail="Color review not found")
+    if existing["is_locked"]: raise HTTPException(status_code=400, detail="This review has already been completed")
+    row = await fetch_one(conn, """
+        UPDATE opportunity_color_reviews SET
+            status='COMPLETED', completed_date=NOW()::date, completed_by=$1, rating=$2,
+            strengths=$3, weaknesses=$4, action_items=$5, comments=$6, is_locked=TRUE, updated_at=NOW()
+        WHERE review_id=$7 AND company_id=$8 RETURNING *""",
+        current_user.user_id, body.rating, body.strengths, body.weaknesses, body.action_items, body.comments,
+        review_id, company_id)
+    await _log(conn, opp_id, "COLOR_REVIEW_COMPLETED", current_user.user_id,
+        comments=f"{existing['review_type']} — {body.rating}")
+    return row
+
+@router.delete("/{opp_id}/color-reviews/{review_id}")
+async def delete_color_review(opp_id: int, review_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    existing = await fetch_one(conn,
+        "SELECT is_locked FROM opportunity_color_reviews WHERE review_id=$1 AND opp_id=$2 AND company_id=$3",
+        review_id, opp_id, company_id)
+    if not existing: raise HTTPException(status_code=404, detail="Color review not found")
+    if existing["is_locked"]: raise HTTPException(status_code=400, detail="This review has been completed and cannot be deleted")
+    result = await execute(conn, "DELETE FROM opportunity_color_reviews WHERE review_id=$1 AND company_id=$2", review_id, company_id)
+    if result == "DELETE 0": raise HTTPException(status_code=404, detail="Color review not found")
+    return {"message": "Color review deleted"}
+
+# ── Win Themes ─────────────────────────────────────────────────────────────
+
+@router.get("/{opp_id}/win-themes")
+async def list_win_themes(opp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    return await fetch_all(conn,
+        "SELECT * FROM opportunity_win_themes WHERE opp_id=$1 AND company_id=$2 ORDER BY sort_order, theme_id",
+        opp_id, company_id)
+
+@router.post("/{opp_id}/win-themes", status_code=201)
+async def add_win_theme(opp_id: int, body: WinThemeCreate, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    next_order = await fetch_val(conn,
+        "SELECT COALESCE(MAX(sort_order),0)+1 FROM opportunity_win_themes WHERE opp_id=$1 AND company_id=$2",
+        opp_id, company_id)
+    row = await fetch_one(conn, """
+        INSERT INTO opportunity_win_themes (opp_id, company_id, theme_title, customer_need, our_strength,
+            proof_points, competitive_advantage, sort_order, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *""",
+        opp_id, company_id, body.theme_title, body.customer_need, body.our_strength,
+        body.proof_points, body.competitive_advantage, next_order, current_user.user_id)
+    return row
+
+@router.patch("/{opp_id}/win-themes/{theme_id}")
+async def update_win_theme(opp_id: int, theme_id: int, body: dict, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    allowed = ["theme_title", "customer_need", "our_strength", "proof_points", "competitive_advantage", "sort_order"]
+    updates = ["updated_at=NOW()"]
+    args = []
+    for k, v in body.items():
+        if k in allowed:
+            args.append(v); updates.append(f"{k}=${len(args)}")
+    if not args:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    args.append(theme_id); args.append(company_id)
+    result = await execute(conn,
+        f"UPDATE opportunity_win_themes SET {','.join(updates)} WHERE theme_id=${len(args)-1} AND company_id=${len(args)}", *args)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Win theme not found")
+    return {"message": "Win theme updated"}
+
+@router.delete("/{opp_id}/win-themes/{theme_id}")
+async def delete_win_theme(opp_id: int, theme_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    await _own_opp_or_404(conn, opp_id, company_id)
+    result = await execute(conn, "DELETE FROM opportunity_win_themes WHERE theme_id=$1 AND company_id=$2", theme_id, company_id)
+    if result == "DELETE 0": raise HTTPException(status_code=404, detail="Win theme not found")
+    return {"message": "Win theme deleted"}
+
 # ── RFP Compliance Matrix ────────────────────────────────────────────────────
 
 @router.get("/{opp_id}/requirements")
@@ -1116,7 +1390,8 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
 
     if opp.get("bid_person_email"):
         ok = await send_bond_reminder(opp["bid_person_email"], opp["bid_person_name"],
-            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "BID_PERSON")
+            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "BID_PERSON",
+            company_id=company_id)
         if ok:
             sent_to.append(opp["bid_person_name"])
             await execute(conn,
@@ -1128,7 +1403,8 @@ async def trigger_bond_reminder(opp_id: int, conn=Depends(get_db), current_user=
 
     if opp.get("manager_email") and opp.get("manager_user_id") != opp.get("bid_person_id"):
         ok = await send_bond_reminder(opp["manager_email"], opp["manager_name"],
-            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "MANAGER")
+            opp["opp_number"], opp["customer_name"], deadline_str, int(days_left), "MANAGER",
+            company_id=company_id)
         if ok:
             sent_to.append(f"{opp['manager_name']} (Manager)")
             await execute(conn,

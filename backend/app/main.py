@@ -442,6 +442,30 @@ async def run_migrations():
         FROM companies c
         ON CONFLICT DO NOTHING;
         """,
+        # ── opp_number_seq: atomic opportunity numbering ────────────────────────
+        # _gen_opp_number used to be SELECT COUNT(*)+1, which two concurrent
+        # requests can both read before either commits, producing a duplicate
+        # opp_number and a 500 on one of them — and once that happens, or any
+        # row is ever deleted, COUNT(*) permanently falls out of sync with
+        # MAX(opp_number) and every future create collides forever. A sequence
+        # is atomic under concurrency by construction. Re-synced past the
+        # current max on every startup so it self-heals any gap already on
+        # disk (from the old logic) without ever moving backward into it.
+        """
+        DO $$
+        DECLARE
+            max_num BIGINT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_sequences WHERE schemaname='public' AND sequencename='opp_number_seq') THEN
+                CREATE SEQUENCE opp_number_seq START WITH 1;
+            END IF;
+            SELECT COALESCE(MAX(NULLIF(substring(opp_number FROM '(\\d+)$'), '')::BIGINT), 0)
+                INTO max_num FROM opportunities_v2;
+            IF max_num > 0 THEN
+                PERFORM setval('opp_number_seq', GREATEST(max_num, (SELECT last_value FROM opp_number_seq)));
+            END IF;
+        END$$;
+        """,
     ]
 
     async with pool.acquire() as conn:

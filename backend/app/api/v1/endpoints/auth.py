@@ -101,7 +101,7 @@ async def login(body: LoginRequest, conn=Depends(get_db)):
         email_sent = False
         try:
             from app.services.email_service import send_otp_email
-            email_sent = await send_otp_email(user["email"], user["full_name"], otp_code)
+            email_sent = await send_otp_email(user["email"], user["full_name"], otp_code, user.get("company_id"))
         except Exception:
             pass
 
@@ -229,7 +229,13 @@ async def _issue_tokens(conn, user: dict) -> dict:
     # so a stale claim in an already-issued token can't grant access after a
     # user is moved between companies.
     access_token  = create_access_token({"sub": str(uid), "username": user["username"], "company_id": user.get("company_id")})
-    refresh_token = create_refresh_token({"sub": str(uid)})
+    # pwd_ts pins this refresh token to the password that was active when it
+    # was issued — /auth/refresh re-checks it against the user's current
+    # password_changed_at, so a refresh token stolen before a password
+    # rotation stops working the moment the password actually changes,
+    # instead of remaining valid for its full lifetime.
+    pwd_ts = int(changed_at.timestamp()) if changed_at is not None else 0
+    refresh_token = create_refresh_token({"sub": str(uid), "pwd_ts": pwd_ts})
 
     await execute(conn, "UPDATE users SET last_login=NOW() WHERE user_id=$1", uid)
 
@@ -282,12 +288,28 @@ async def _issue_tokens(conn, user: dict) -> dict:
 async def refresh_token(body: dict, conn=Depends(get_db)):
     try:
         payload = decode_token(body.get("refresh_token", ""))
-        if payload.get("type") != "refresh":
-            raise HTTPException(status_code=401, detail="Invalid token type")
-        new_token = create_access_token({"sub": payload["sub"]})
-        return {"access_token": new_token, "token_type": "bearer"}
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    uid = payload.get("sub")
+    try:
+        uid_int = int(uid)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    user = await fetch_one(conn,
+        "SELECT is_active, is_locked, password_changed_at, company_id FROM users WHERE user_id=$1", uid_int)
+    if not user or not user["is_active"] or user["is_locked"]:
+        raise HTTPException(status_code=401, detail="Account is inactive or locked")
+
+    changed_at = user["password_changed_at"]
+    current_pwd_ts = int(changed_at.timestamp()) if changed_at is not None else 0
+    if current_pwd_ts != payload.get("pwd_ts", 0):
+        raise HTTPException(status_code=401, detail="Your password has changed. Please log in again.")
+
+    new_token = create_access_token({"sub": uid, "company_id": user.get("company_id")})
+    return {"access_token": new_token, "token_type": "bearer"}
 
 
 # ── Logout ────────────────────────────────────────────────────────────────────
