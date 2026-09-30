@@ -800,6 +800,10 @@ CREATE TABLE IF NOT EXISTS solution_types (
     is_active     BOOLEAN DEFAULT TRUE
 );
 
+-- Backs _gen_opp_number's nextval() call — atomic under concurrency,
+-- unlike the SELECT COUNT(*)+1 it replaced.
+CREATE SEQUENCE IF NOT EXISTS opp_number_seq START WITH 1;
+
 -- Full opportunity/RFP record (from both Excel files combined)
 CREATE TABLE IF NOT EXISTS opportunities_v2 (
     opp_id           SERIAL PRIMARY KEY,

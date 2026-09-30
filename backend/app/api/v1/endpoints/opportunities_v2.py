@@ -240,10 +240,13 @@ class RefConfigUpdate(BaseModel):
 async def _gen_opp_number(conn) -> str:
     # Globally sequential (not per-tenant) — same documented tradeoff as
     # bid_number in bids.py: still globally unique, just won't restart at
-    # 00001 for each new tenant.
+    # 00001 for each new tenant. Backed by opp_number_seq (see main.py's
+    # run_migrations) rather than SELECT COUNT(*)+1: two concurrent requests
+    # reading the same count could both compute the same number and one
+    # would fail with a UniqueViolationError; nextval() is atomic.
     year = datetime.now().year
-    count = await fetch_val(conn, "SELECT COUNT(*) FROM opportunities_v2") or 0
-    return f"OPP-{year}-{str(count+1).zfill(5)}"
+    n = await fetch_val(conn, "SELECT nextval('opp_number_seq')")
+    return f"OPP-{year}-{str(n).zfill(5)}"
 
 async def _own_opp_or_404(conn, opp_id: int, company_id: int):
     ok = await fetch_val(conn, "SELECT opp_id FROM opportunities_v2 WHERE opp_id=$1 AND company_id=$2", opp_id, company_id)
