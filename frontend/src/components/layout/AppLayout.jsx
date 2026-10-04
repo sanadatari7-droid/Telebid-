@@ -171,7 +171,7 @@ function QuickSearch({ onClose }) {
 }
 
 export default function AppLayout() {
-  const { user, logout } = useAuthStore()
+  const { user, clearAuth } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
   const { t, i18n } = useTranslation()
@@ -197,7 +197,7 @@ export default function AppLayout() {
     return () => window.removeEventListener("keydown", handler)
   }, [])
 
-  const handleLogout = async () => { await logout(); navigate("/login") }
+  const handleLogout = () => { clearAuth(); navigate("/login") }
 
   // Get breadcrumb label
   const pathParts = location.pathname.split("/").filter(Boolean)
