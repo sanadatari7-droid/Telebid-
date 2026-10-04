@@ -287,7 +287,7 @@ export default function AppLayout() {
               <div className="text-[10px] text-gray-400 truncate">{user?.role_name || "User"}</div>
             </div>
             <button onClick={handleLogout} title="Logout"
-              className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 transition-all">
+              className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all">
               <LogOut size={13}/>
             </button>
           </div>
