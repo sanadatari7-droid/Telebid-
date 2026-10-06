@@ -466,7 +466,12 @@ CREATE TABLE IF NOT EXISTS companies (
     logo_url      VARCHAR(500),
     industry      VARCHAR(100),
     is_active     BOOLEAN DEFAULT TRUE,
-    created_at    TIMESTAMPTZ DEFAULT NOW()
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    -- Module 1 (Company) / Sub-module A fields
+    currency_id        INT REFERENCES currencies(currency_id) DEFAULT 1,
+    currency_decimals  SMALLINT DEFAULT 2 CHECK (currency_decimals IN (2,3,4)),
+    services_ict       BOOLEAN DEFAULT FALSE,
+    services_telecom   BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS system_settings (

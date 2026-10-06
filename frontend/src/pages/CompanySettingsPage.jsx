@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { companyConfigApi, empApi, oppsV2Api, usersApi } from "../services/api"
+import { COUNTRIES } from "../constants/countries"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import {
   Building2, Key, Hash, Users, Briefcase, TrendingUp, Shield,
-  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight
+  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2
 } from "lucide-react"
 
 // 9 sections exactly as in Image 2
@@ -25,12 +26,21 @@ const SECTIONS = [
 function CompanyInfoSection() {
   const qc = useQueryClient()
   const { data: company } = useQuery({ queryKey:["company-cfg"], queryFn:()=>companyConfigApi.get().then(r=>r.data) })
+  const { data: currencies = [] } = useQuery({ queryKey:["currencies"], queryFn:()=>companyConfigApi.getCurrencies().then(r=>r.data) })
   const [form, setForm] = useState({})
   useEffect(() => { if (company) setForm({ ...company }) }, [company])
   const fc = e => setForm(p=>({...p,[e.target.name]:e.target.value}))
+  const toggleService = key => setForm(p=>({...p,[key]: !p[key]}))
   const saveMut = useMutation({
-    mutationFn: () => companyConfigApi.update(form),
-    onSuccess: () => { toast.success("Company updated"); qc.invalidateQueries({queryKey:["company-cfg"]}) }
+    mutationFn: () => {
+      if (!form.services_ict && !form.services_telecom) {
+        toast.error("Select at least one service offered (ICT, Telecom, or both)")
+        return Promise.reject(new Error("validation"))
+      }
+      return companyConfigApi.update(form)
+    },
+    onSuccess: () => { toast.success("Company updated"); qc.invalidateQueries({queryKey:["company-cfg"]}) },
+    onError: err => { if (err.message !== "validation") toast.error(err?.response?.data?.detail || "Failed to save") }
   })
 
   return (
@@ -64,6 +74,55 @@ function CompanyInfoSection() {
           <div><label className="label">Phone</label><input name="phone" className="input" value={form.phone||""} onChange={fc}/></div>
           <div><label className="label">Email</label><input name="email" className="input" value={form.email||""} onChange={fc}/></div>
           <div><label className="label">Website</label><input name="website" className="input" value={form.website||""} onChange={fc}/></div>
+        </div>
+
+        {/* Module 1 / Sub-module A — country & currency */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Country of Operation</label>
+            <select name="country" className="input" value={form.country||""} onChange={fc}>
+              <option value="">Select country…</option>
+              {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Currency</label>
+            <select name="currency_id" className="input" value={form.currency_id||""}
+              onChange={e=>setForm(p=>({...p, currency_id: e.target.value ? Number(e.target.value) : null}))}>
+              <option value="">Select currency…</option>
+              {currencies.map(c => <option key={c.currency_id} value={c.currency_id}>{c.currency_code} — {c.currency_name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Currency decimals — single choice of 2 / 3 / 4 */}
+        <div>
+          <label className="label">Currency Decimals</label>
+          <div className="flex gap-2">
+            {[2,3,4].map(n => (
+              <label key={n} className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer text-sm font-medium",
+                form.currency_decimals===n ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}>
+                <input type="checkbox" className="accent-blue-600" checked={form.currency_decimals===n}
+                  onChange={()=>setForm(p=>({...p, currency_decimals:n}))}/>
+                {n} decimals
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Services offered — ICT / Telecom checkboxes, both = Both */}
+        <div>
+          <label className="label">Services Offered</label>
+          <div className="flex gap-2">
+            {[["services_ict","ICT"],["services_telecom","Telecom"]].map(([key,label]) => (
+              <label key={key} className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer text-sm font-medium",
+                form[key] ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}>
+                <input type="checkbox" className="accent-blue-600" checked={!!form[key]} onChange={()=>toggleService(key)}/>
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="form-hint">Check both to offer ICT and Telecom.</p>
         </div>
       </div>
 

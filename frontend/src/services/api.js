@@ -380,8 +380,9 @@ export const serviceCatsApi = {
 
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────
 export const companyConfigApi = {
-  get:      () => api.get("/company-config"),
-  update:   d => api.patch("/company-config", d),
+  get:         () => api.get("/company-config"),
+  update:      d => api.patch("/company-config", d),
+  getCurrencies: () => api.get("/company-config/currencies"),
   getAMs:   () => api.get("/company-config/account-managers"),
   addAM:    d => api.post("/company-config/account-managers", d),
   removeAM: id => api.delete(`/company-config/account-managers/${id}`),

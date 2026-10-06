@@ -466,6 +466,35 @@ async def run_migrations():
             END IF;
         END$$;
         """,
+        # ── companies: Module 1 (Company) / Sub-module A fields ────────────────
+        """
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='companies' AND column_name='currency_id'
+            ) THEN
+                ALTER TABLE companies ADD COLUMN currency_id INT REFERENCES currencies(currency_id) DEFAULT 1;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='companies' AND column_name='currency_decimals'
+            ) THEN
+                ALTER TABLE companies ADD COLUMN currency_decimals SMALLINT DEFAULT 2 CHECK (currency_decimals IN (2,3,4));
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='companies' AND column_name='services_ict'
+            ) THEN
+                ALTER TABLE companies ADD COLUMN services_ict BOOLEAN DEFAULT FALSE;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='companies' AND column_name='services_telecom'
+            ) THEN
+                ALTER TABLE companies ADD COLUMN services_telecom BOOLEAN DEFAULT FALSE;
+            END IF;
+        END$$;
+        """,
     ]
 
     async with pool.acquire() as conn:

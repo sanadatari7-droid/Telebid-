@@ -29,16 +29,37 @@ class CompanyUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     website: Optional[str] = None
+    # Module 1 (Company) / Sub-module A
+    country: Optional[str] = None
+    currency_id: Optional[int] = None
+    currency_decimals: Optional[int] = None
+    services_ict: Optional[bool] = None
+    services_telecom: Optional[bool] = None
 
 @router.get("")
 async def get_company(conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
     return await fetch_one(conn, "SELECT * FROM companies WHERE company_id=$1", company_id)
 
+@router.get("/currencies")
+async def list_currencies(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    return await fetch_all(conn, "SELECT currency_id, currency_code, currency_name, symbol FROM currencies ORDER BY currency_code")
+
 @router.patch("")
 async def update_company(body: CompanyUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
-    allowed = ["company_name","company_name_ar","company_initials","activation_code","address","phone","email","website"]
+    provided = body.dict(exclude_unset=True)
+
+    if "currency_decimals" in provided and provided["currency_decimals"] not in (2, 3, 4):
+        raise HTTPException(status_code=400, detail="Currency decimals must be 2, 3, or 4")
+
+    if provided.get("services_ict") is False and provided.get("services_telecom") is False:
+        raise HTTPException(status_code=400, detail="Select at least one service offered (ICT, Telecom, or both)")
+
+    allowed = [
+        "company_name","company_name_ar","company_initials","activation_code","address","phone","email","website",
+        "country","currency_id","currency_decimals","services_ict","services_telecom",
+    ]
     updates, args = [], []
     for k, v in body.dict(exclude_none=True).items():
         if k in allowed:
