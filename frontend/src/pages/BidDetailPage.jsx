@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { bidsApi, commentsApi } from "../services/api"
 import { fmt } from "../utils/fmt"
+import { apiErrorMessage } from "../utils/apiError"
 import clsx from "clsx"
 import toast from "react-hot-toast"
 import { ArrowLeft, CheckCircle2, Upload, Trophy, Clock, XCircle, Archive, MessageSquare, History, QrCode, Send, Trash2 } from "lucide-react"
@@ -80,7 +81,9 @@ export default function BidDetailPage() {
       await bidsApi.uploadDoc(bidId, "GENERAL", file)
       toast.success("Uploaded")
       qc.invalidateQueries({ queryKey: ["bid-docs", bidId] })
-    } catch {} finally { setUploading(false) }
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to upload document"))
+    } finally { setUploading(false) }
   }
 
   if (isLoading) return (
