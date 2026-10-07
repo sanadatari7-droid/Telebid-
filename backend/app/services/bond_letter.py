@@ -1,5 +1,5 @@
 """Bid bond request letter, filled into the company's Word template
-(app/templates/bid_bond_request.docx — made from the company's own Bid_Bond_T.docx).
+(app/templates/bid_bond_request.docx — the wording and tables of the company's Bid_Bond_T.docx, without logo or footers).
 
 The letter's fixed wording (title, To, From, opening, closing, notes) is edited once in
 Company Settings → Bid Bond Approval Cycle; each bond fills the RFP-info table, and the
