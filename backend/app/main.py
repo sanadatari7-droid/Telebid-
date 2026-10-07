@@ -611,6 +611,50 @@ async def run_migrations():
             ADD COLUMN IF NOT EXISTS winner_tcv       NUMERIC(18,4);
         ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_strategic BOOLEAN NOT NULL DEFAULT FALSE;
         """,
+        # ── Module 2 / Sub-module 2: RFP Go / No-Go evaluation ────────────────
+        """
+        CREATE TABLE IF NOT EXISTS rfp_eval_settings (
+            company_id  INT PRIMARY KEY REFERENCES companies(company_id),
+            pass_mark   NUMERIC(5,2) NOT NULL DEFAULT 60,
+            updated_at  TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS rfp_eval_questions (
+            question_id      SERIAL PRIMARY KEY,
+            company_id       INT NOT NULL REFERENCES companies(company_id),
+            question         TEXT NOT NULL,
+            weight           NUMERIC(5,2) NOT NULL CHECK (weight > 0 AND weight <= 100),
+            evaluator_title  VARCHAR(150),
+            sort_order       INT NOT NULL DEFAULT 0,
+            is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at       TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_rfp_eval_questions_company ON rfp_eval_questions(company_id);
+        CREATE TABLE IF NOT EXISTS rfp_eval_options (
+            option_id    SERIAL PRIMARY KEY,
+            question_id  INT NOT NULL REFERENCES rfp_eval_questions(question_id),
+            label        VARCHAR(100) NOT NULL,
+            value        NUMERIC(5,2) NOT NULL CHECK (value >= 0 AND value <= 100),
+            sort_order   INT NOT NULL DEFAULT 0,
+            is_active    BOOLEAN NOT NULL DEFAULT TRUE
+        );
+        CREATE TABLE IF NOT EXISTS rfp_ict_evaluations (
+            rfp_id          INT PRIMARY KEY REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+            ebitda_pct      NUMERIC(6,2),
+            score           NUMERIC(6,2),
+            recommendation  VARCHAR(20),
+            updated_by      INT REFERENCES users(user_id),
+            updated_at      TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS rfp_ict_eval_answers (
+            rfp_id       INT NOT NULL REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+            question_id  INT NOT NULL REFERENCES rfp_eval_questions(question_id),
+            option_id    INT NOT NULL REFERENCES rfp_eval_options(option_id),
+            comment      TEXT,
+            answered_by  INT REFERENCES users(user_id),
+            answered_at  TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (rfp_id, question_id)
+        );
+        """,
     ]
 
     async with pool.acquire() as conn:

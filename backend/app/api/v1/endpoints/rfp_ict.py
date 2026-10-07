@@ -348,13 +348,14 @@ async def list_rfps(conn=Depends(get_db), current_user=Depends(get_current_user)
     company_id = require_company(current_user)
     return await fetch_all(conn, """
         SELECT r.*, c.name_en AS client_name_en, c.name_ar AS client_name_ar, c.is_strategic,
-               am.full_name AS am_name,
+               am.full_name AS am_name, ev.recommendation AS eval_recommendation, ev.score AS eval_score,
                (r.submission_date - CURRENT_DATE)::INT AS days_to_submission,
                (SELECT sc.cat_name FROM rfp_ict_scope s JOIN service_categories sc ON s.cat_id=sc.cat_id
                 WHERE s.rfp_id=r.rfp_id AND sc.parent_id IS NULL LIMIT 1) AS scope_level1,
                (SELECT COUNT(*) FROM rfp_ict_scope s WHERE s.rfp_id=r.rfp_id)::INT AS scope_count
         FROM rfp_ict r JOIN clients c ON r.client_id=c.client_id
         LEFT JOIN company_account_managers am ON am.am_id=r.am_id
+        LEFT JOIN rfp_ict_evaluations ev ON ev.rfp_id=r.rfp_id
         WHERE r.company_id=$1
         ORDER BY r.created_at DESC""", company_id)
 

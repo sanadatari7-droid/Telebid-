@@ -396,6 +396,10 @@ export const rfpIctApi = {
   scopeOptions:      () => api.get("/rfp-ict/scope-options"),
   addScopeOption:    d => api.post("/rfp-ict/scope-options", d),
   removeScopeOption: id => api.delete(`/rfp-ict/scope-options/${id}`),
+  evalConfig:        () => api.get("/rfp-ict/eval-config"),
+  saveEvalConfig:    d => api.put("/rfp-ict/eval-config", d),
+  evaluation:        id => api.get(`/rfp-ict/${id}/evaluation`),
+  saveEvaluation:    (id, d) => api.put(`/rfp-ict/${id}/evaluation`, d),
 }
 
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────

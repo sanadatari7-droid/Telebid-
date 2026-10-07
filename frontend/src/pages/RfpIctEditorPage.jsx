@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react"
-import { useNavigate, useParams, Link } from "react-router-dom"
+import { useNavigate, useParams, Link, useSearchParams } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import toast from "react-hot-toast"
@@ -11,6 +11,7 @@ import { clientsApi, rfpIctApi } from "../services/api"
 import { apiErrorMessage } from "../utils/apiError"
 import { fmt } from "../utils/fmt"
 import { SCOPE_LEVELS, buildTree, STATUS_STYLE, LOST_STATUSES, optionLabel, formatMoney } from "../utils/rfpIct"
+import RfpEvaluation from "../components/rfp/RfpEvaluation"
 
 const EMPTY = {
   client_id: "", rfp_ref: "", channel: "", project_type: "", description: "",
@@ -215,6 +216,8 @@ export default function RfpIctEditorPage() {
   const qc = useQueryClient()
   const { i18n } = useTranslation()
   const lang = i18n.language
+  const [params, setParams] = useSearchParams()
+  const tab = !isNew && params.get("tab") === "evaluation" ? "evaluation" : "details"
 
   const { data: meta } = useQuery({ queryKey: ["rfp-ict-lists"], queryFn: () => rfpIctApi.lists().then(r => r.data) })
   const { data: team } = useQuery({ queryKey: ["rfp-ict-team"], queryFn: () => rfpIctApi.teamOptions().then(r => r.data) })
@@ -299,21 +302,35 @@ export default function RfpIctEditorPage() {
       <div className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-100">
         <div className="max-w-screen-xl mx-auto px-6 py-3 flex items-center gap-4">
           <Link to="/rfp-ict" className="btn-ghost btn-sm"><ArrowLeft size={14}/> RFP ICT</Link>
-          <div className="min-w-0">
+          <div className="min-w-0 flex items-center gap-2">
             <h1 className="text-lg font-bold text-gray-900 truncate">{isNew ? "New RFP" : existing?.rfp_number || "RFP"}</h1>
             {!isNew && existing && (
               <span className={clsx("badge text-xs", STATUS_STYLE[form.status] || "badge-gray")}>{optionLabel(lists.status, form.status, lang)}</span>
             )}
           </div>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1 ml-4 bg-gray-100 rounded-xl p-1">
+            {[["details", "1 · RFP details"], ["evaluation", "2 · Evaluation"]].map(([id, lbl]) => (
+              <button key={id} disabled={isNew && id === "evaluation"} title={isNew && id === "evaluation" ? "Create the RFP first" : undefined}
+                onClick={() => setParams(id === "evaluation" ? { tab: "evaluation" } : {})}
+                className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+                  tab === id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900")}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {tab === "details" && <div className="ml-auto flex items-center gap-3">
             {missing.length > 0 && <span className="hidden md:block text-xs text-gray-400">Still needed: {missing.join(", ")}</span>}
             <button className="btn-secondary" onClick={() => navigate("/rfp-ict")}>Cancel</button>
             <button className="btn-primary" disabled={missing.length > 0 || addingClient || saveMut.isPending} onClick={() => saveMut.mutate()}>
               <Check size={14}/> {saveMut.isPending ? "Saving…" : isNew ? "Create RFP" : "Save changes"}
             </button>
-          </div>
+          </div>}
         </div>
       </div>
+
+      {tab === "evaluation" ? (
+        <div className="max-w-screen-xl mx-auto p-6"><RfpEvaluation rfpId={rfpId}/></div>
+      ) : (
 
       <div className="max-w-screen-xl mx-auto p-6 grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
         <div className="space-y-5 min-w-0">
@@ -509,6 +526,7 @@ export default function RfpIctEditorPage() {
           </div>
         </aside>
       </div>
+      )}
     </div>
   )
 }

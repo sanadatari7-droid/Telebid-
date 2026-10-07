@@ -9,6 +9,10 @@ import { rfpIctApi } from "../services/api"
 import { fmt } from "../utils/fmt"
 import { apiErrorMessage } from "../utils/apiError"
 import { SCOPE_LEVELS, buildTree, STATUS_STYLE, LOST_STATUSES, optionLabel, formatMoney } from "../utils/rfpIct"
+import EvalQuestionsManager from "../components/rfp/EvalQuestionsManager"
+
+const GO_STYLE = { GO: "bg-green-100 text-green-700", NO_GO: "bg-red-100 text-red-700", INCOMPLETE: "bg-amber-100 text-amber-700", NOT_SET_UP: "bg-gray-100 text-gray-500" }
+const GO_LABEL = { GO: "Go", NO_GO: "No-Go", INCOMPLETE: "Incomplete", NOT_SET_UP: "Not set up" }
 
 const STATUS_FILTERS = [
   { id: "all",    label: "All",         match: () => true },
@@ -103,7 +107,7 @@ export default function RfpIctPage() {
   const navigate = useNavigate()
   const { i18n } = useTranslation()
   const [params, setParams] = useSearchParams()
-  const tab = params.get("tab") === "scope" ? "scope" : "rfps"
+  const tab = ["scope", "questions"].includes(params.get("tab")) ? params.get("tab") : "rfps"
   const [q, setQ] = useState("")
   const [filter, setFilter] = useState("all")
 
@@ -133,8 +137,8 @@ export default function RfpIctPage() {
       </div>
 
       <div className="flex gap-1 border-b border-gray-200">
-        {[["rfps", "RFPs"], ["scope", "Scope of work list"]].map(([id, lbl]) => (
-          <button key={id} onClick={() => setParams(id === "scope" ? { tab: "scope" } : {})}
+        {[["rfps", "RFPs"], ["scope", "Scope of work list"], ["questions", "Evaluation questions"]].map(([id, lbl]) => (
+          <button key={id} onClick={() => setParams(id === "rfps" ? {} : { tab: id })}
             className={clsx("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px",
               tab === id ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-900")}>
             {lbl}
@@ -142,7 +146,7 @@ export default function RfpIctPage() {
         ))}
       </div>
 
-      {tab === "scope" ? <ScopeListManager/> : (
+      {tab === "scope" ? <ScopeListManager/> : tab === "questions" ? <EvalQuestionsManager/> : (
         <>
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[220px] max-w-sm">
@@ -164,13 +168,13 @@ export default function RfpIctPage() {
             <div className="overflow-x-auto">
               <table className="tbl">
                 <thead>
-                  <tr><th>RFP</th><th>Client</th><th>Submission</th><th>Bond</th><th>Scope</th><th title="Account manager">AM</th><th className="text-right">TCV</th><th>Status</th><th></th></tr>
+                  <tr><th>RFP</th><th>Client</th><th>Submission</th><th>Bond</th><th>Scope</th><th title="Account manager">AM</th><th className="text-right">TCV</th><th>Go / No-Go</th><th>Status</th><th></th></tr>
                 </thead>
                 <tbody>
                   {isLoading ? (
-                    <tr><td colSpan={9} className="text-center py-10"><Loader2 className="animate-spin inline text-blue-500" size={20}/></td></tr>
+                    <tr><td colSpan={10} className="text-center py-10"><Loader2 className="animate-spin inline text-blue-500" size={20}/></td></tr>
                   ) : shown.length === 0 ? (
-                    <tr><td colSpan={9} className="py-12">
+                    <tr><td colSpan={10} className="py-12">
                       <div className="empty-state">
                         <div className="empty-icon mx-auto"><Monitor size={28}/></div>
                         <p className="text-sm text-gray-400">{rfps.length ? "No RFPs match this search." : "No ICT RFPs yet. Use \"New RFP\" to add the first one."}</p>
@@ -207,6 +211,13 @@ export default function RfpIctPage() {
                         </td>
                         <td className="text-sm text-gray-700">{r.am_name || <span className="text-gray-400">—</span>}</td>
                         <td className="text-sm text-right tabular-nums whitespace-nowrap">{formatMoney(r.tcv, meta?.currency)}</td>
+                        <td onClick={e => { e.stopPropagation(); navigate(`/rfp-ict/${r.rfp_id}?tab=evaluation`) }}>
+                          {r.eval_recommendation ? (
+                            <span className={clsx("badge text-xs whitespace-nowrap", GO_STYLE[r.eval_recommendation])}>
+                              {GO_LABEL[r.eval_recommendation]}{r.eval_score !== null ? ` · ${Number(r.eval_score)}%` : ""}
+                            </span>
+                          ) : <span className="text-xs text-gray-400">Not evaluated</span>}
+                        </td>
                         <td>
                           <span className={clsx("badge text-xs whitespace-nowrap", STATUS_STYLE[r.status] || "badge-gray")}>{optionLabel(lists.status, r.status, i18n.language)}</span>
                           <div className="text-[11px] text-gray-400 mt-0.5">{optionLabel(lists.phase, r.phase, i18n.language)}</div>
