@@ -63,6 +63,7 @@
     @apply w-full px-3.5 py-2.5 rounded-xl border border-gray-200 bg-white text-sm
            text-gray-900 placeholder-gray-400
            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+           disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed
            transition-all duration-150;
   }
   .input-error { @apply input border-red-400 focus:ring-red-400; }

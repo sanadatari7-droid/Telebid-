@@ -7,7 +7,7 @@ import toast from "react-hot-toast"
 import clsx from "clsx"
 import {
   Building2, Key, Hash, Users, Briefcase, TrendingUp, Shield,
-  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck
+  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck, Send
 } from "lucide-react"
 
 // 9 sections exactly as in Image 2
@@ -17,11 +17,11 @@ const SECTIONS = [
   { id:"3", num:"3", label:"Reference Model",                    icon:Hash },
   { id:"4", num:"4", label:"Account Managers",                   icon:Users },
   { id:"5", num:"5", label:"Bid Specialists / Managers",         icon:Briefcase },
-  { id:"7", num:"7", label:"Bond Approval Flow Chart",           icon:Shield },
   { id:"8", num:"8", label:"Bid Evaluations Questions & Value",  icon:ClipboardList },
   { id:"9", num:"9", label:"EXPRO Feasibility Study",            icon:Microscope },
   { id:"B", num:"B", label:"Evaluators (Module 1 / Sub-B)",      icon:UserCheck },
   { id:"C", num:"C", label:"Pricing Approval (Module 1 / Sub-C)", icon:TrendingUp },
+  { id:"D", num:"D", label:"Bid Bond Approval (Module 1 / Sub-D)", icon:Shield },
 ]
 
 // ── Section 1 & 2: Company Info ───────────────────────────────────────────────
@@ -566,21 +566,80 @@ function PricingApprovalSection() {
   )
 }
 
-// ── Section 7: Bond Approval Flow Chart ──────────────────────────────────────
+// ── Section D: Bid Bond Approval Cycle (Module 1 / Sub-module D) ─────────────
+// L1 → L2 → L3, then the request is emailed to the Bid Bond Issuance Office.
 function BondApprovalSection() {
+  const qc = useQueryClient()
+  const { data: cfg } = useQuery({ queryKey:["bond-approval"], queryFn:()=>companyConfigApi.getBondApproval().then(r=>r.data) })
+  const [form, setForm] = useState(null)
+  useEffect(() => { if (cfg) setForm({ ...cfg, office_email: cfg.office_email || "" }) }, [cfg])
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  const saveMut = useMutation({
+    mutationFn: () => companyConfigApi.saveBondApproval({
+      l1_title: form.l1_title, l2_title: form.l2_title, l3_title: form.l3_title,
+      office_name: form.office_name, office_email: form.office_email || null, auto_send: form.auto_send,
+    }),
+    onSuccess: () => { toast.success("Bid bond approval cycle saved"); qc.invalidateQueries({queryKey:["bond-approval"]}) },
+    onError: err => toast.error(apiErrorMessage(err, "Failed to save bid bond approval cycle"))
+  })
+
+  if (!form) return null
+
   return (
-    <div className="card space-y-4">
-      <div className="section-title flex items-center gap-2"><Shield size={13}/> 7 — Bond Approval Flow Chart</div>
-      <div className="alert-info text-sm">Bond workflow: New Bond → Review → Bid Bond → Final Bond</div>
-      <div className="flex items-center gap-2 flex-wrap">
-        {["New Bond","→","Bid Bond","→","Final Bond","→","Released"].map((s,i)=>(
-          <div key={i} className={clsx("text-sm font-semibold",
-            s==="→"?"text-gray-300":i===0?"badge-blue":i===2?"badge-amber":i===4?"badge-green":"badge-gray")}>
-            {s==="→" ? s : <span className="badge">{s}</span>}
+    <div className="space-y-6">
+      <div className="card space-y-4">
+        <div className="section-title flex items-center gap-2"><Shield size={13}/> D — Bid Bond Approval Cycle</div>
+        <div className="alert-info text-xs">
+          Every bond request is approved in this order. Once the last level approves, the request is sent to the issuance office.
+        </div>
+        <div className="flex items-stretch gap-2">
+          {["l1_title","l2_title","l3_title"].map((k, i) => (
+            <React.Fragment key={k}>
+              {i > 0 && <ChevronRight size={16} className="text-gray-300 self-center flex-shrink-0"/>}
+              <div className="flex-1 p-3 rounded-xl border border-gray-200 bg-white">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Level {i+1}</div>
+                <input className="input" value={form[k] || ""} onChange={e => set(k, e.target.value)}/>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 p-3 rounded-xl border border-green-200 bg-green-50">
+          <Send size={15} className="text-green-700 flex-shrink-0"/>
+          <div className="text-sm text-gray-700">
+            Then {form.auto_send ? "sent automatically" : "sent manually"} to <strong className="text-gray-900">{form.office_name || "the issuance office"}</strong>
+            {form.office_email ? <span className="text-gray-500"> · {form.office_email}</span> : null}
           </div>
-        ))}
+        </div>
       </div>
-      <p className="text-xs text-gray-400">Manage bonds in the Bonds section of any opportunity.</p>
+
+      <div className="card space-y-4">
+        <div className="section-title">Bid Bond Issuance Office</div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Office name</label>
+            <input className="input" value={form.office_name || ""} onChange={e => set("office_name", e.target.value)}/>
+          </div>
+          <div>
+            <label className="label">Office email</label>
+            <input className="input" value={form.office_email} onChange={e => set("office_email", e.target.value)}
+              placeholder="bonds@yourbank.com"/>
+            <p className="form-hint">Separate several addresses with commas.</p>
+          </div>
+        </div>
+        <label className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100 cursor-pointer">
+          <input type="checkbox" className="accent-blue-600 w-4 h-4" checked={!!form.auto_send}
+            onChange={e => set("auto_send", e.target.checked)}/>
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Send automatically after final approval</div>
+            <div className="text-xs text-gray-400">When off, someone sends it from the bond with "Send to office".</div>
+          </div>
+        </label>
+      </div>
+
+      <button className="btn-primary" disabled={saveMut.isPending} onClick={() => saveMut.mutate()}>
+        <Check size={13}/> {saveMut.isPending ? "Saving…" : "Save Bid Bond Approval Cycle"}
+      </button>
     </div>
   )
 }
@@ -680,11 +739,11 @@ export default function CompanySettingsPage() {
           {active==="3" ? <RefModelSection/> : null}
           {active==="4" ? <PeopleSection type="am"/> : null}
           {active==="5" ? <PeopleSection type="bm"/> : null}
-          {active==="7" ? <BondApprovalSection/> : null}
           {active==="8" ? <BidEvalSection/> : null}
           {active==="9" ? <ExproFeasibilitySection/> : null}
           {active==="B" ? <EvaluatorsSection/> : null}
           {active==="C" ? <PricingApprovalSection/> : null}
+          {active==="D" ? <BondApprovalSection/> : null}
         </div>
       </div>
     </div>

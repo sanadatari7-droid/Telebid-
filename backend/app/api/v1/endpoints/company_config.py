@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -34,6 +35,31 @@ class PricingApprovalUpdate(BaseModel):
     ict_l1_min_margin: Optional[float] = Field(None, ge=0, le=100)
     ict_l2_min_margin: Optional[float] = Field(None, ge=0, le=100)
     ebitda_min_pct: Optional[float] = Field(None, ge=-100, le=100)
+
+class BondApprovalUpdate(BaseModel):
+    l1_title: str = Field("Bid Department Manager", min_length=1, max_length=100)
+    l2_title: str = Field("VP Sales", min_length=1, max_length=100)
+    l3_title: str = Field("Finance", min_length=1, max_length=100)
+    office_name: str = Field("Bid Bond Issuance Office", min_length=1, max_length=150)
+    office_email: Optional[str] = Field(None, max_length=500)
+    auto_send: bool = True
+
+BOND_APPROVAL_DEFAULTS = {
+    "l1_title": "Bid Department Manager", "l2_title": "VP Sales", "l3_title": "Finance",
+    "office_name": "Bid Bond Issuance Office", "office_email": None, "auto_send": True,
+}
+
+_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+def normalize_email_list(raw: Optional[str]) -> Optional[str]:
+    """'a@x.com; b@y.com' -> 'a@x.com, b@y.com'. Raises ValueError naming the first bad address."""
+    if not raw or not raw.strip():
+        return None
+    parts = [p.strip() for p in re.split(r"[,;]", raw) if p.strip()]
+    for p in parts:
+        if not _EMAIL_RE.match(p):
+            raise ValueError(p)
+    return ", ".join(parts)
 
 PRICING_DEFAULTS = {
     "l1_title": "Bid Department Manager", "l2_title": "Sales VP", "l3_title": "Finance",
@@ -192,3 +218,32 @@ async def save_pricing_approval(body: PricingApprovalUpdate, conn=Depends(get_db
     """, company_id, body.l1_title.strip(), body.l2_title.strip(), body.l3_title.strip(),
         d1, d2, m1, m2, body.ebitda_min_pct)
     return {"message": "Pricing approval cycle saved"}
+
+# Bid Bond Approval Cycle (Module 1 / Sub-module D)
+async def get_bond_approval_config(conn, company_id: int) -> dict:
+    row = await fetch_one(conn, "SELECT * FROM company_bond_approval WHERE company_id=$1", company_id)
+    return dict(row) if row else {"company_id": company_id, **BOND_APPROVAL_DEFAULTS}
+
+@router.get("/bond-approval")
+async def get_bond_approval(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    return await get_bond_approval_config(conn, require_company(current_user))
+
+@router.put("/bond-approval")
+async def save_bond_approval(body: BondApprovalUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
+    try:
+        office_email = normalize_email_list(body.office_email)
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=f"Not a valid email address: {bad}")
+    if body.auto_send and not office_email:
+        raise HTTPException(status_code=400, detail="Enter the issuance office's email address, or turn off automatic sending")
+    await execute(conn, """
+        INSERT INTO company_bond_approval (company_id, l1_title, l2_title, l3_title, office_name, office_email, auto_send, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+        ON CONFLICT (company_id) DO UPDATE SET
+            l1_title=EXCLUDED.l1_title, l2_title=EXCLUDED.l2_title, l3_title=EXCLUDED.l3_title,
+            office_name=EXCLUDED.office_name, office_email=EXCLUDED.office_email,
+            auto_send=EXCLUDED.auto_send, updated_at=NOW()
+    """, company_id, body.l1_title.strip(), body.l2_title.strip(), body.l3_title.strip(),
+        body.office_name.strip(), office_email, body.auto_send)
+    return {"message": "Bid bond approval cycle saved"}

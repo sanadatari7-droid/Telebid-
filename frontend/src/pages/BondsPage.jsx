@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { bondsApi, oppsV2Api } from "../services/api"
-import { fmt } from "../utils/fmt"
+import { bondsApi, oppsV2Api, companyConfigApi } from "../services/api"
+import { fmt, fmtDT } from "../utils/fmt"
+import { apiErrorMessage } from "../utils/apiError"
 import toast from "react-hot-toast"
 import clsx from "clsx"
-import { Plus, Check, X, AlertTriangle, Clock, Shield, FileText, Trash2, Eye } from "lucide-react"
+import { Plus, Check, X, AlertTriangle, Clock, Shield, FileText, Trash2, Eye, Send } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 const BOND_TYPES = [
@@ -15,6 +16,8 @@ const BOND_TYPES = [
 ]
 const STATUS_STYLE = {
   PENDING:   "bg-yellow-100 text-yellow-700",
+  APPROVED:  "bg-indigo-100 text-indigo-700",
+  REQUESTED: "bg-purple-100 text-purple-700",
   ISSUED:    "bg-green-100 text-green-700",
   EXPIRED:   "bg-red-100 text-red-700",
   CANCELLED: "bg-gray-100 text-gray-500",
@@ -28,6 +31,102 @@ const EMPTY_BOND = {
   language:"Arabic", submission_date:"", requester_name:"", recipient_name:"",
 }
 
+const DEFAULT_TITLES = ["Bid Department Manager", "VP Sales", "Finance"]
+
+function useBondApprovalConfig() {
+  const { data } = useQuery({ queryKey:["bond-approval"], queryFn:()=>companyConfigApi.getBondApproval().then(r=>r.data) })
+  return {
+    titles: data ? [data.l1_title, data.l2_title, data.l3_title] : DEFAULT_TITLES,
+    officeName: data?.office_name || "Bid Bond Issuance Office",
+  }
+}
+
+function invalidateBonds(qc, bondId) {
+  qc.invalidateQueries({queryKey:["bonds"]})
+  qc.invalidateQueries({queryKey:["bond-stats"]})
+  if (bondId) qc.invalidateQueries({queryKey:["bond", bondId]})
+}
+
+// L1 → L2 → L3 → issuance office. Only the next level in line can approve.
+function ApprovalCycle({ bond }) {
+  const qc = useQueryClient()
+  const { titles, officeName } = useBondApprovalConfig()
+  const level = bond.approval_level || 0
+
+  const levelMut = useMutation({
+    mutationFn: lvl => bondsApi.approveLevel(bond.bond_id, lvl),
+    onSuccess: (res, lvl) => {
+      const office = res.data.office
+      if (office?.sent) toast.success(`Approved — request sent to ${office.office_name}`)
+      else if (office && !office.sent) toast.error(`Approved, but not sent: ${office.error}`, { duration: 8000 })
+      else toast.success(`Level ${lvl} approved`)
+      invalidateBonds(qc, bond.bond_id)
+    },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't record the approval"))
+  })
+  const sendMut = useMutation({
+    mutationFn: () => bondsApi.sendToOffice(bond.bond_id),
+    onSuccess: res => { toast.success(res.data.message); invalidateBonds(qc, bond.bond_id) },
+    onError: err => { toast.error(apiErrorMessage(err, "Couldn't send the request")); invalidateBonds(qc, bond.bond_id) }
+  })
+
+  const fullyApproved = ["APPROVED","REQUESTED","ISSUED"].includes(bond.status)
+
+  return (
+    <div className="card-sm bg-blue-50 border-blue-100 space-y-2">
+      <div className="section-title text-xs mb-1">Approval Cycle</div>
+      {[1,2,3].map(lvl => {
+        const done = level >= lvl
+        const isNext = bond.status === "PENDING" && level === lvl - 1
+        return (
+          <div key={lvl} className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-white border border-blue-100">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={clsx("badge flex-shrink-0", done ? "bg-green-100 text-green-700" : "badge-gray")}>L{lvl}</span>
+              <span className="text-sm font-semibold text-gray-900 truncate">{titles[lvl-1]}</span>
+            </div>
+            {done ? (
+              <span className="text-xs text-green-700 font-medium text-right">✓ {bond[`l${lvl}_approver_name`]} · {fmtDT(bond[`l${lvl}_approved_at`])}</span>
+            ) : isNext ? (
+              <button className="btn-primary btn-sm" disabled={levelMut.isPending} onClick={() => levelMut.mutate(lvl)}>
+                <Check size={12}/> {levelMut.isPending ? "Approving…" : "Approve"}
+              </button>
+            ) : (
+              <span className="text-xs text-gray-400">Waiting</span>
+            )}
+          </div>
+        )
+      })}
+
+      <div className={clsx("flex items-center justify-between gap-3 p-2.5 rounded-lg border",
+        bond.office_sent_at ? "bg-green-50 border-green-200" : "bg-white border-blue-100")}>
+        <div className="flex items-center gap-2 min-w-0">
+          <Send size={14} className={bond.office_sent_at ? "text-green-600" : "text-gray-400"}/>
+          <span className="text-sm font-semibold text-gray-900 truncate">{officeName}</span>
+        </div>
+        {bond.office_sent_at ? (
+          <span className="text-xs text-green-700 font-medium text-right">✓ Sent to {bond.office_sent_to} · {fmtDT(bond.office_sent_at)}</span>
+        ) : fullyApproved ? (
+          <button className="btn-secondary btn-sm" disabled={sendMut.isPending} onClick={() => sendMut.mutate()}>
+            <Send size={12}/> {sendMut.isPending ? "Sending…" : "Send to office"}
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">Sent after Level 3</span>
+        )}
+      </div>
+      {bond.office_send_error && !bond.office_sent_at && (
+        <div className="flex items-start gap-2 text-xs text-red-600">
+          <AlertTriangle size={13} className="flex-shrink-0 mt-0.5"/> {bond.office_send_error}
+        </div>
+      )}
+      {bond.office_sent_at && bond.status === "REQUESTED" && (
+        <button className="btn-ghost btn-sm text-xs" disabled={sendMut.isPending} onClick={() => sendMut.mutate()}>
+          <Send size={11}/> Send again
+        </button>
+      )}
+    </div>
+  )
+}
+
 function BondModal({ bond, onClose }) {
   const qc = useQueryClient()
   const isNew = !bond?.bond_id
@@ -37,26 +136,29 @@ function BondModal({ bond, onClose }) {
   })
   const [form, setForm] = useState(bond ? {...EMPTY_BOND, ...bond} : EMPTY_BOND)
   const fc = e => setForm(p=>({...p,[e.target.name]:e.target.value}))
-  const [approverInput, setApproverInput] = useState({ business_solution:"", cbo:"" })
+  // Approval state changes while this window is open, so read it live rather than from the list row.
+  const { data: liveBond } = useQuery({
+    queryKey:["bond", bond?.bond_id],
+    queryFn:()=>bondsApi.get(bond.bond_id).then(r=>r.data),
+    enabled: !isNew,
+  })
+  const current = liveBond || bond
+  // Once Level 1 approves, the request content is fixed (the server enforces this too).
+  const locked = !isNew && (current?.approval_level || 0) > 0
 
   const computedLg = form.lg_percentage && form.lg_base_value
     ? (Number(form.lg_base_value) * Number(form.lg_percentage) / 100)
     : null
 
   const saveMut = useMutation({
-    mutationFn: () => isNew
-      ? bondsApi.create({...form, opp_id:Number(form.opp_id), bond_amount:form.bond_amount?Number(form.bond_amount):null,
-          lg_percentage:form.lg_percentage?Number(form.lg_percentage):null, lg_base_value:form.lg_base_value?Number(form.lg_base_value):null})
-      : bondsApi.update(bond.bond_id, {...form, bond_amount:form.bond_amount?Number(form.bond_amount):null,
-          lg_percentage:form.lg_percentage?Number(form.lg_percentage):null, lg_base_value:form.lg_base_value?Number(form.lg_base_value):null}),
-    onSuccess: () => { toast.success(isNew?"Bond created":"Bond updated"); qc.invalidateQueries({queryKey:["bonds"]}); qc.invalidateQueries({queryKey:["bond-stats"]}); onClose() }
-  })
-
-  const approveMut = useMutation({
-    mutationFn: ({ stage, name }) => stage === "business_solution"
-      ? bondsApi.approveBusinessSolution(bond.bond_id, name)
-      : bondsApi.approveCbo(bond.bond_id, name),
-    onSuccess: () => { toast.success("Approval recorded"); qc.invalidateQueries({queryKey:["bonds"]}) }
+    mutationFn: () => {
+      const { status, ...rest } = form
+      const payload = {...rest, bond_amount:form.bond_amount?Number(form.bond_amount):null,
+        lg_percentage:form.lg_percentage?Number(form.lg_percentage):null, lg_base_value:form.lg_base_value?Number(form.lg_base_value):null}
+      return isNew ? bondsApi.create({...payload, opp_id:Number(form.opp_id)}) : bondsApi.update(bond.bond_id, payload)
+    },
+    onSuccess: () => { toast.success(isNew?"Bond request created — waiting for Level 1 approval":"Bond updated"); invalidateBonds(qc, bond?.bond_id); onClose() },
+    onError: err => toast.error(apiErrorMessage(err, "Failed to save bond"))
   })
 
   return (
@@ -89,24 +191,31 @@ function BondModal({ bond, onClose }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="label">Bid No. (Ref.)</label><input name="bid_ref" className="input" placeholder="e.g. SLM-RF: MAU-26-166-CP" value={form.bid_ref||""} onChange={fc}/></div>
-            <div><label className="label">Bond Number</label><input name="bond_number" className="input" value={form.bond_number||""} onChange={fc}/></div>
-          </div>
-          <div><label className="label">Bid Subject</label><input name="bid_subject" className="input" value={form.bid_subject||""} onChange={fc}/></div>
+          {locked && (
+            <div className="alert-info text-xs">
+              This request has been approved, so its details (reference, beneficiary, amount, dates, language) are fixed.
+              Bond number, issuer bank, issue date and notes can still be filled in.
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="label">Beneficiary</label><input name="beneficiary" className="input" value={form.beneficiary||""} onChange={fc}/></div>
-            <div><label className="label">Beneficiary Address</label><input name="beneficiary_address" className="input" value={form.beneficiary_address||""} onChange={fc}/></div>
+            <div><label className="label">Bid No. (Ref.)</label><input name="bid_ref" disabled={locked} className="input" placeholder="e.g. SLM-RF: MAU-26-166-CP" value={form.bid_ref||""} onChange={fc}/></div>
+            <div><label className="label">Bond Number</label><input name="bond_number" className="input" value={form.bond_number||""} onChange={fc}/></div>
+          </div>
+          <div><label className="label">Bid Subject</label><input name="bid_subject" disabled={locked} className="input" value={form.bid_subject||""} onChange={fc}/></div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="label">Beneficiary</label><input name="beneficiary" disabled={locked} className="input" value={form.beneficiary||""} onChange={fc}/></div>
+            <div><label className="label">Beneficiary Address</label><input name="beneficiary_address" disabled={locked} className="input" value={form.beneficiary_address||""} onChange={fc}/></div>
           </div>
 
           <div className="card-sm bg-gray-50">
             <div className="section-title text-xs mb-2">L/G Value &amp; Percentage</div>
             <div className="grid grid-cols-3 gap-3 items-end">
-              <div><label className="label">Percentage %</label><input name="lg_percentage" type="number" step="0.01" className="input" placeholder="1" value={form.lg_percentage||""} onChange={fc}/></div>
-              <div><label className="label">Base Value (SR)</label><input name="lg_base_value" type="number" className="input" value={form.lg_base_value||""} onChange={fc}/></div>
+              <div><label className="label">Percentage %</label><input name="lg_percentage" disabled={locked} type="number" step="0.01" className="input" placeholder="1" value={form.lg_percentage||""} onChange={fc}/></div>
+              <div><label className="label">Base Value (SR)</label><input name="lg_base_value" disabled={locked} type="number" className="input" value={form.lg_base_value||""} onChange={fc}/></div>
               <div><label className="label">Bond Amount</label>
-                <input name="bond_amount" type="number" className="input" placeholder={computedLg ? computedLg.toLocaleString() : ""} value={form.bond_amount||""} onChange={fc}/>
+                <input name="bond_amount" disabled={locked} type="number" className="input" placeholder={computedLg ? computedLg.toLocaleString() : ""} value={form.bond_amount||""} onChange={fc}/>
               </div>
             </div>
             {computedLg != null && !form.bond_amount && (
@@ -117,16 +226,16 @@ function BondModal({ bond, onClose }) {
           </div>
 
           <div className="grid grid-cols-3 gap-4">
-            <div><label className="label">Submission Date</label><input name="submission_date" type="date" className="input" value={form.submission_date||""} onChange={fc}/></div>
+            <div><label className="label">Submission Date</label><input name="submission_date" disabled={locked} type="date" className="input" value={form.submission_date||""} onChange={fc}/></div>
             <div><label className="label">Issue Date</label><input name="issue_date" type="date" className="input" value={form.issue_date||""} onChange={fc}/></div>
-            <div><label className="label">L/G Validity (Expiry)</label><input name="expiry_date" type="date" className="input" value={form.expiry_date||""} onChange={fc}/></div>
+            <div><label className="label">L/G Validity (Expiry)</label><input name="expiry_date" disabled={locked} type="date" className="input" value={form.expiry_date||""} onChange={fc}/></div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div><label className="label">Issuer Bank</label><input name="issuer_bank" className="input" value={form.issuer_bank||""} onChange={fc}/></div>
             <div>
               <label className="label">Language</label>
-              <select name="language" className="input" value={form.language||"Arabic"} onChange={fc}>
+              <select name="language" disabled={locked} className="input" value={form.language||"Arabic"} onChange={fc}>
                 <option value="Arabic">Arabic</option>
                 <option value="English">English</option>
               </select>
@@ -140,39 +249,7 @@ function BondModal({ bond, onClose }) {
 
           <div><label className="label">Notes</label><textarea name="notes" className="input" rows={2} value={form.notes||""} onChange={fc}/></div>
 
-          {!isNew && (
-            <div className="card-sm bg-blue-50 border-blue-100">
-              <div className="section-title text-xs mb-2">Approval Chain</div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Business Solution</label>
-                  {bond.business_solution_approver ? (
-                    <p className="text-sm text-green-700 font-medium">✓ {bond.business_solution_approver}</p>
-                  ) : (
-                    <div className="flex gap-1.5">
-                      <input className="input !py-1.5" placeholder="Approver name" value={approverInput.business_solution}
-                        onChange={e=>setApproverInput(p=>({...p,business_solution:e.target.value}))}/>
-                      <button className="btn-secondary btn-sm" disabled={!approverInput.business_solution||approveMut.isPending}
-                        onClick={()=>approveMut.mutate({stage:"business_solution", name:approverInput.business_solution})}>Record</button>
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="label">CBO</label>
-                  {bond.cbo_approver ? (
-                    <p className="text-sm text-green-700 font-medium">✓ {bond.cbo_approver}</p>
-                  ) : (
-                    <div className="flex gap-1.5">
-                      <input className="input !py-1.5" placeholder="Approver name" value={approverInput.cbo}
-                        onChange={e=>setApproverInput(p=>({...p,cbo:e.target.value}))}/>
-                      <button className="btn-secondary btn-sm" disabled={!approverInput.cbo||approveMut.isPending}
-                        onClick={()=>approveMut.mutate({stage:"cbo", name:approverInput.cbo})}>Record</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {!isNew && current && <ApprovalCycle bond={current}/>}
 
           <div className="flex gap-3 justify-end pt-2">
             <button className="btn-secondary" onClick={onClose}>Cancel</button>
@@ -210,9 +287,11 @@ export default function BondsPage() {
   })
   const { data: stats } = useQuery({ queryKey:["bond-stats"], queryFn:()=>bondsApi.stats().then(r=>r.data), retry:1 })
 
-  const approveMut = useMutation({
+  const { titles } = useBondApprovalConfig()
+  const issueMut = useMutation({
     mutationFn: id => bondsApi.approve(id),
-    onSuccess: () => { toast.success("Bond approved & issued"); qc.invalidateQueries({queryKey:["bonds"]}); qc.invalidateQueries({queryKey:["bond-stats"]}) }
+    onSuccess: () => { toast.success("Bond marked as issued"); invalidateBonds(qc) },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't mark the bond as issued"))
   })
   const deleteMut = useMutation({
     mutationFn: id => bondsApi.delete(id),
@@ -257,7 +336,7 @@ export default function BondsPage() {
           </select>
           <select className="input w-auto py-2" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
             <option value="">{t("bonds.allStatuses")}</option>
-            {["PENDING","ISSUED","EXPIRED","CANCELLED","RELEASED"].map(s=><option key={s} value={s}>{s}</option>)}
+            {["PENDING","APPROVED","REQUESTED","ISSUED","EXPIRED","CANCELLED","RELEASED"].map(s=><option key={s} value={s}>{s}</option>)}
           </select>
         </div>
       </div>
@@ -310,12 +389,20 @@ export default function BondsPage() {
                         </span>
                       )}
                     </td>
-                    <td><span className={clsx("badge text-xs",STATUS_STYLE[b.status]||"badge-gray")}>{b.status}</span></td>
+                    <td>
+                      <span className={clsx("badge text-xs",STATUS_STYLE[b.status]||"badge-gray")}>{b.status}</span>
+                      {b.status==="PENDING" && (
+                        <div className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">Awaiting {titles[b.approval_level||0]}</div>
+                      )}
+                      {b.office_send_error && !b.office_sent_at && (
+                        <div className="text-[11px] text-red-500 mt-0.5 whitespace-nowrap">Not sent to office</div>
+                      )}
+                    </td>
                     <td>
                       <div className="flex gap-1">
-                        <button className="btn-ghost btn-sm" onClick={()=>setEditBond(b)}><Eye size={12}/></button>
-                        {b.status==="PENDING" && (
-                          <button className="btn-success btn-sm" onClick={()=>approveMut.mutate(b.bond_id)} title="Approve & Issue">
+                        <button className="btn-ghost btn-sm" onClick={()=>setEditBond(b)} title="Open"><Eye size={12}/></button>
+                        {["APPROVED","REQUESTED"].includes(b.status) && (
+                          <button className="btn-success btn-sm" disabled={issueMut.isPending} onClick={()=>issueMut.mutate(b.bond_id)} title="Mark as issued">
                             <Check size={12}/>
                           </button>
                         )}

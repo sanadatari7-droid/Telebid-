@@ -351,8 +351,8 @@ export const bondsApi = {
   approve: id => api.post(`/bonds/${id}/approve`),
   delete:  id => api.delete(`/bonds/${id}`),
   stats:   () => api.get("/bonds/stats/summary"),
-  approveBusinessSolution: (id, approver_name) => api.post(`/bonds/${id}/approve-business-solution`, { approver_name }),
-  approveCbo:              (id, approver_name) => api.post(`/bonds/${id}/approve-cbo`, { approver_name }),
+  approveLevel: (id, level) => api.post(`/bonds/${id}/approve-level/${level}`),
+  sendToOffice: id => api.post(`/bonds/${id}/send-to-office`),
 }
 
 // ── AI ALERTS (scheduler) ─────────────────────────────────────────────────────
@@ -394,6 +394,8 @@ export const companyConfigApi = {
   removeEvaluator:  id => api.delete(`/company-config/evaluators/${id}`),
   getPricingApproval:  () => api.get("/company-config/pricing-approval"),
   savePricingApproval: d => api.put("/company-config/pricing-approval", d),
+  getBondApproval:     () => api.get("/company-config/bond-approval"),
+  saveBondApproval:    d => api.put("/company-config/bond-approval", d),
 }
 
 // ── WON RECORDS ───────────────────────────────────────────────────────────────

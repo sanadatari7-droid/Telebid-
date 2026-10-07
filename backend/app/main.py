@@ -524,6 +524,36 @@ async def run_migrations():
             updated_at               TIMESTAMPTZ DEFAULT NOW()
         );
         """,
+        # ── company_bond_approval table: Module 1 / Sub-module D ───────────────
+        """
+        CREATE TABLE IF NOT EXISTS company_bond_approval (
+            company_id   INT PRIMARY KEY REFERENCES companies(company_id),
+            l1_title     VARCHAR(100) NOT NULL DEFAULT 'Bid Department Manager',
+            l2_title     VARCHAR(100) NOT NULL DEFAULT 'VP Sales',
+            l3_title     VARCHAR(100) NOT NULL DEFAULT 'Finance',
+            office_name  VARCHAR(150) NOT NULL DEFAULT 'Bid Bond Issuance Office',
+            office_email VARCHAR(500),
+            auto_send    BOOLEAN NOT NULL DEFAULT TRUE,
+            updated_at   TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        # ── opportunity_bonds: L1 -> L2 -> L3 approval + issuance-office send ──
+        """
+        ALTER TABLE opportunity_bonds
+            ADD COLUMN IF NOT EXISTS approval_level      SMALLINT DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS l1_approved_by      INT REFERENCES users(user_id),
+            ADD COLUMN IF NOT EXISTS l1_approver_name    VARCHAR(150),
+            ADD COLUMN IF NOT EXISTS l1_approved_at      TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS l2_approved_by      INT REFERENCES users(user_id),
+            ADD COLUMN IF NOT EXISTS l2_approver_name    VARCHAR(150),
+            ADD COLUMN IF NOT EXISTS l2_approved_at      TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS l3_approved_by      INT REFERENCES users(user_id),
+            ADD COLUMN IF NOT EXISTS l3_approver_name    VARCHAR(150),
+            ADD COLUMN IF NOT EXISTS l3_approved_at      TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS office_sent_at      TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS office_sent_to      VARCHAR(500),
+            ADD COLUMN IF NOT EXISTS office_send_error   TEXT;
+        """,
     ]
 
     async with pool.acquire() as conn:

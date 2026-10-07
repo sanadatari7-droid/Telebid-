@@ -2,10 +2,32 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import date
 from pydantic import BaseModel, Field
+from decimal import Decimal
 from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, require_company
-from app.middleware.auth import get_current_user, CurrentUser
+from app.middleware.auth import get_current_user, require_roles, CurrentUser
+from app.api.v1.endpoints.company_config import get_bond_approval_config
+from app.services.email_service import send_bond_issuance_request, smtp_configured
 
 router = APIRouter(prefix="/bonds", tags=["Bonds"])
+
+APPROVER_ROLES = ("ADMIN", "DEPT_MANAGER", "DIRECTOR")
+
+# The request content the three levels sign off on. Once Level 1 has approved,
+# these can't change — otherwise the office would receive figures nobody approved.
+LOCKED_AFTER_APPROVAL = ["bond_amount", "lg_percentage", "lg_base_value", "beneficiary", "beneficiary_address",
+                         "bid_ref", "bid_subject", "language", "submission_date", "expiry_date"]
+
+# Statuses only the approval cycle may set; PATCH can only move a bond to the others.
+CYCLE_STATUSES = {"PENDING", "APPROVED", "REQUESTED", "ISSUED"}
+
+def _same(a, b) -> bool:
+    a = None if a == "" else a
+    b = None if b == "" else b
+    if a is None or b is None:
+        return a is None and b is None
+    if isinstance(a, (int, float, Decimal)) or isinstance(b, (int, float, Decimal)):
+        return float(a) == float(b)
+    return str(a) == str(b)
 
 class BondCreate(BaseModel):
     opp_id: int
@@ -48,9 +70,6 @@ class BondUpdate(BaseModel):
     submission_date: Optional[date] = None
     requester_name: Optional[str] = None
     recipient_name: Optional[str] = None
-
-class ApprovalRecord(BaseModel):
-    approver_name: str
 
 @router.get("")
 async def list_bonds(
@@ -121,16 +140,24 @@ async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), curr
                "bid_ref","bid_subject","beneficiary_address","lg_percentage","lg_base_value","language",
                "submission_date","requester_name","recipient_name"]
     data = body.dict(exclude_none=True)
+    current = await fetch_one(conn, f"SELECT status, approval_level, {', '.join(LOCKED_AFTER_APPROVAL)} FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
+    if not current: raise HTTPException(status_code=404, detail="Bond not found")
+    if "status" in data and data["status"] != current["status"] and data["status"] in CYCLE_STATUSES:
+        raise HTTPException(status_code=400,
+            detail=f"A bond can only become {data['status']} through the approval cycle")
+    if (current["approval_level"] or 0) > 0:
+        changed = [k for k in LOCKED_AFTER_APPROVAL if k in data and not _same(data[k], current[k])]
+        if changed:
+            raise HTTPException(status_code=400,
+                detail=f"This request has already been approved, so these can't be changed: {', '.join(changed)}")
     # Same derive-don't-duplicate rule as create: if the request updates the
     # percentage or base value without also typing a new bond_amount, keep
     # bond_amount in sync with them rather than leaving a stale figure.
     if "bond_amount" not in data and ("lg_percentage" in data or "lg_base_value" in data):
-        current = await fetch_one(conn, "SELECT lg_percentage, lg_base_value FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
-        if current:
-            pct = data.get("lg_percentage", current["lg_percentage"])
-            base = data.get("lg_base_value", current["lg_base_value"])
-            if pct is not None and base is not None:
-                data["bond_amount"] = round(float(base) * float(pct) / 100, 2)
+        pct = data.get("lg_percentage", current["lg_percentage"])
+        base = data.get("lg_base_value", current["lg_base_value"])
+        if pct is not None and base is not None:
+            data["bond_amount"] = round(float(base) * float(pct) / 100, 2)
 
     updates = ["updated_at=NOW()"]
     args = []
@@ -143,36 +170,96 @@ async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), curr
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
     return {"message": "Updated"}
 
-@router.post("/{bond_id}/approve-business-solution")
-async def approve_business_solution(bond_id: int, body: ApprovalRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    """First sign-off in the request chain (Requester -> Business Solution -> CBO)
-    before the bank issues the bond — matches the company's own request form."""
-    company_id = require_company(current_user)
-    result = await execute(conn,
-        "UPDATE opportunity_bonds SET business_solution_approver=$1, business_solution_approved_at=NOW() WHERE bond_id=$2 AND company_id=$3",
-        body.approver_name, bond_id, company_id)
-    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
-    return {"message": "Business Solution approval recorded"}
+async def _send_to_office(conn, bond_id: int, company_id: int) -> dict:
+    """Email the approved request to the Bid Bond Issuance Office. On success the
+    bond moves to REQUESTED; on failure the reason is stored so it shows on the bond."""
+    cfg = await get_bond_approval_config(conn, company_id)
+    error = None
+    if not cfg.get("office_email"):
+        error = "No issuance office email is set (Company Settings → Bid Bond Approval), so the request wasn't sent"
+    elif not await smtp_configured(company_id):
+        error = "Email isn't set up yet (System Settings → Email), so the request wasn't sent"
+    else:
+        bond = await fetch_one(conn, """
+            SELECT b.*, o.opp_number, o.customer_name, c.currency_code
+            FROM opportunity_bonds b
+            LEFT JOIN opportunities_v2 o ON b.opp_id=o.opp_id
+            LEFT JOIN currencies c ON b.currency_id=c.currency_id
+            WHERE b.bond_id=$1 AND b.company_id=$2""", bond_id, company_id)
+        approvals = [(cfg[f"l{i}_title"], bond[f"l{i}_approver_name"], bond[f"l{i}_approved_at"]) for i in (1, 2, 3)]
+        if not await send_bond_issuance_request(cfg["office_email"], cfg["office_name"], bond, approvals, company_id=company_id):
+            error = "The email server didn't accept the message — check the office address and email settings, then send again"
 
-@router.post("/{bond_id}/approve-cbo")
-async def approve_cbo(bond_id: int, body: ApprovalRecord, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    """Second, final sign-off in the request chain, per the company's form."""
+    if error:
+        await execute(conn, "UPDATE opportunity_bonds SET office_send_error=$1 WHERE bond_id=$2 AND company_id=$3",
+                      error, bond_id, company_id)
+        return {"sent": False, "error": error}
+    await execute(conn, """
+        UPDATE opportunity_bonds SET status='REQUESTED', office_sent_at=NOW(), office_sent_to=$1,
+               office_send_error=NULL, updated_at=NOW()
+        WHERE bond_id=$2 AND company_id=$3""", cfg["office_email"], bond_id, company_id)
+    return {"sent": True, "to": cfg["office_email"], "office_name": cfg["office_name"]}
+
+@router.post("/{bond_id}/approve-level/{level}")
+async def approve_bond_level(bond_id: int, level: int, conn=Depends(get_db),
+                             current_user=Depends(require_roles(*APPROVER_ROLES))):
+    """Bid bond approval cycle: Level 1 -> 2 -> 3, strictly in order. When Level 3
+    approves, the request goes to the issuance office automatically (if enabled)."""
     company_id = require_company(current_user)
-    result = await execute(conn,
-        "UPDATE opportunity_bonds SET cbo_approver=$1, cbo_approved_at=NOW() WHERE bond_id=$2 AND company_id=$3",
-        body.approver_name, bond_id, company_id)
-    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
-    return {"message": "CBO approval recorded"}
+    if level not in (1, 2, 3): raise HTTPException(status_code=400, detail="Level must be 1, 2, or 3")
+    bond = await fetch_one(conn, "SELECT status, approval_level, created_by FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2",
+                           bond_id, company_id)
+    if not bond: raise HTTPException(status_code=404, detail="Bond not found")
+    if bond["status"] != "PENDING" or (bond["approval_level"] or 0) != level - 1:
+        raise HTTPException(status_code=400, detail=f"This bond isn't waiting for Level {level} approval")
+    if bond["created_by"] == current_user.user_id and "ADMIN" not in current_user.roles:
+        raise HTTPException(status_code=403,
+            detail="Maker-checker: you requested this bond, so someone else has to approve it")
+
+    new_status = "APPROVED" if level == 3 else "PENDING"
+    result = await execute(conn, f"""
+        UPDATE opportunity_bonds SET approval_level=$1, l{level}_approved_by=$2, l{level}_approver_name=$3,
+               l{level}_approved_at=NOW(), status=$4, updated_at=NOW()
+        WHERE bond_id=$5 AND company_id=$6 AND status='PENDING' AND COALESCE(approval_level,0)=$7""",
+        level, current_user.user_id, current_user.full_name, new_status, bond_id, company_id, level - 1)
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=409, detail="Someone else just recorded this approval — refresh and try again")
+
+    response = {"message": f"Level {level} approved", "status": new_status}
+    if level == 3:
+        cfg = await get_bond_approval_config(conn, company_id)
+        if cfg["auto_send"]:
+            response["office"] = await _send_to_office(conn, bond_id, company_id)
+            if response["office"]["sent"]:
+                response["status"] = "REQUESTED"
+    return response
+
+@router.post("/{bond_id}/send-to-office")
+async def send_bond_to_office(bond_id: int, conn=Depends(get_db), current_user=Depends(require_roles(*APPROVER_ROLES))):
+    """Send (or re-send) a fully approved request to the issuance office."""
+    company_id = require_company(current_user)
+    status = await fetch_val(conn, "SELECT status FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
+    if status is None: raise HTTPException(status_code=404, detail="Bond not found")
+    if status not in ("APPROVED", "REQUESTED"):
+        raise HTTPException(status_code=400, detail="Only a bond approved at all three levels can be sent to the issuance office")
+    result = await _send_to_office(conn, bond_id, company_id)
+    if not result["sent"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": f"Request sent to {result['office_name']}", **result}
 
 @router.post("/{bond_id}/approve")
 async def approve_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    """The bank has actually issued the bond — distinct from the two internal
-    sign-offs above, which happen before the request is even sent to the bank."""
+    """The office/bank has actually issued the bond — only after the approval cycle."""
     company_id = require_company(current_user)
-    result = await execute(conn, "UPDATE opportunity_bonds SET approved_by=$1, approved_at=NOW(), status='ISSUED' WHERE bond_id=$2 AND company_id=$3",
+    result = await execute(conn, """
+        UPDATE opportunity_bonds SET approved_by=$1, approved_at=NOW(), status='ISSUED', updated_at=NOW()
+        WHERE bond_id=$2 AND company_id=$3 AND status IN ('APPROVED','REQUESTED')""",
         current_user.user_id, bond_id, company_id)
-    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
-    return {"message": "Bond approved and issued"}
+    if result == "UPDATE 0":
+        exists = await fetch_val(conn, "SELECT 1 FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond_id, company_id)
+        if not exists: raise HTTPException(status_code=404, detail="Bond not found")
+        raise HTTPException(status_code=400, detail="A bond can only be marked issued after all three approval levels")
+    return {"message": "Bond marked as issued"}
 
 @router.delete("/{bond_id}")
 async def delete_bond(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):

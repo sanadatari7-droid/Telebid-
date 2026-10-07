@@ -38,6 +38,10 @@ async def _get_smtp_config(company_id: int) -> dict:
         "enabled":    (cfg.get("email_enabled","false")).lower()=="true",
     }
 
+async def smtp_configured(company_id: int) -> bool:
+    smtp = await _get_smtp_config(company_id)
+    return bool(smtp["host"] and smtp["user"])
+
 async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1) -> bool:
     try:
         smtp = await _get_smtp_config(company_id)
@@ -228,3 +232,66 @@ async def send_ai_alert_email(to: str, full_name: str, headline: str, reason: st
     </div>"""
     text = f"{headline}\n\n{opp_number} — {customer_name}\n\nWhy: {reason}\n\nRecommended action: {recommended_action}"
     return await send_email(to, f"[TeleBid Alert] {headline}", html, text, company_id=company_id)
+
+BOND_TYPE_LABELS = {"NEW_BOND": "New Bond", "BID_BOND": "Bid Bond", "FINAL_BOND": "Final Bond"}
+
+async def send_bond_issuance_request(to: str, office_name: str, bond: dict, approvals: list,
+                                     company_id: int = 1) -> bool:
+    """Formal bond request to the Bid Bond Issuance Office, sent once all three
+    approval levels have signed off. `approvals` is [(level_title, approver_name, approved_at)]."""
+    type_label = BOND_TYPE_LABELS.get(bond.get("bond_type"), bond.get("bond_type") or "Bond")
+    amount = bond.get("bond_amount")
+    amount_str = f"{bond.get('currency_code') or ''} {float(amount):,.2f}".strip() if amount is not None else "—"
+    pct = bond.get("lg_percentage")
+    base = bond.get("lg_base_value")
+    pct_str = f"{float(pct):g}% of {float(base):,.2f}" if pct is not None and base is not None else "—"
+
+    rows = [
+        ("Opportunity #", bond.get("opp_number")),
+        ("Customer", bond.get("customer_name")),
+        ("Bid No. (Ref.)", bond.get("bid_ref")),
+        ("Bid Subject", bond.get("bid_subject")),
+        ("Bond Type", type_label),
+        ("Beneficiary", bond.get("beneficiary")),
+        ("Beneficiary Address", bond.get("beneficiary_address")),
+        ("Bond Amount", amount_str),
+        ("Percentage", pct_str),
+        ("Language", bond.get("language")),
+        ("Submission Date", bond.get("submission_date")),
+        ("L/G Validity (Expiry)", bond.get("expiry_date")),
+        ("Requester (From)", bond.get("requester_name")),
+    ]
+    rows_html = "".join(
+        f'<tr><td style="padding:7px 0;color:#6b7280;font-size:13px;width:42%;border-top:1px solid #f3f4f6">{_esc(k)}</td>'
+        f'<td style="padding:7px 0;font-weight:bold;color:#111827;border-top:1px solid #f3f4f6">{_esc(v) if v not in (None, "") else "—"}</td></tr>'
+        for k, v in rows)
+    approvals_html = "".join(
+        f'<tr><td style="padding:6px 0;color:#6b7280;font-size:13px;width:42%">Level {i} — {_esc(title)}</td>'
+        f'<td style="padding:6px 0;color:#065f46;font-weight:bold">✓ {_esc(name)} · {_esc(at.strftime("%d %b %Y %H:%M") if at else "")}</td></tr>'
+        for i, (title, name, at) in enumerate(approvals, 1))
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:20px">
+      <div style="background:#1e4080;padding:22px;border-radius:12px 12px 0 0;text-align:center">
+        <h1 style="color:white;margin:0;font-size:20px">{_esc(type_label)} Issuance Request</h1>
+        <p style="color:#afc3e8;margin:6px 0 0;font-size:13px">{_esc(bond.get("opp_number"))} · {_esc(bond.get("customer_name"))}</p>
+      </div>
+      <div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
+        <p style="color:#374151;font-size:15px">Dear <strong>{_esc(office_name)}</strong>,</p>
+        <p style="color:#4b5563;font-size:14px">Please issue the following {_esc(type_label.lower())}. It has been approved at all three levels.</p>
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin:16px 0">
+          <table style="width:100%;border-collapse:collapse">{rows_html}</table>
+        </div>
+        <p style="color:#374151;margin:16px 0 6px;font-size:13px;font-weight:bold">Approvals</p>
+        <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px">
+          <table style="width:100%;border-collapse:collapse">{approvals_html}</table>
+        </div>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+        <p style="color:#9ca3af;font-size:11px;text-align:center">Sent automatically by TeleBid Enterprise · Bid Bond Management</p>
+      </div>
+    </div>"""
+    text_lines = [f"{type_label} issuance request — {bond.get('opp_number')} · {bond.get('customer_name')}", ""]
+    text_lines += [f"{k}: {v if v not in (None, '') else '—'}" for k, v in rows]
+    text_lines += ["", "Approvals:"] + [f"Level {i} — {t}: {n}" for i, (t, n, _) in enumerate(approvals, 1)]
+    subject = f"{type_label} Issuance Request — {bond.get('bid_ref') or bond.get('opp_number')}"
+    return await send_email(to, subject, html, "\n".join(text_lines), company_id=company_id)
