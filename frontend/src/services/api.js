@@ -400,6 +400,9 @@ export const rfpIctApi = {
   saveEvalConfig:    d => api.put("/rfp-ict/eval-config", d),
   evaluation:        id => api.get(`/rfp-ict/${id}/evaluation`),
   saveEvaluation:    (id, d) => api.put(`/rfp-ict/${id}/evaluation`, d),
+  bidBond:           id => api.get(`/rfp-ict/${id}/bid-bond`),
+  saveBidBond:       (id, d) => api.put(`/rfp-ict/${id}/bid-bond`, d),
+  deleteBidBond:     id => api.delete(`/rfp-ict/${id}/bid-bond`),
 }
 
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────

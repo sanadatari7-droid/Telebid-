@@ -124,7 +124,7 @@ export default function RfpIctPage() {
   const counts = Object.fromEntries(STATUS_FILTERS.map(f => [f.id, rfps.filter(r => f.match(r.status)).length]))
   const needle = q.trim().toLowerCase()
   const shown = rfps.filter(r => STATUS_FILTERS.find(f => f.id === filter).match(r.status) && (!needle ||
-    [r.rfp_number, r.rfp_ref, r.client_name_en, r.client_name_ar, r.am_name].some(v => (v || "").toLowerCase().includes(needle))))
+    [r.rfp_number, r.rfp_title, r.rfp_ref, r.client_name_en, r.client_name_ar, r.am_name].some(v => (v || "").toLowerCase().includes(needle))))
 
   return (
     <div className="p-6 max-w-screen-xl mx-auto space-y-5">
@@ -151,7 +151,7 @@ export default function RfpIctPage() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[220px] max-w-sm">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
-              <input className="input pl-9" placeholder="Search client, RFP number or reference" value={q} onChange={e => setQ(e.target.value)}/>
+              <input className="input pl-9" placeholder="Search client, title, RFP number or reference" value={q} onChange={e => setQ(e.target.value)}/>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {STATUS_FILTERS.map(f => (
@@ -186,6 +186,7 @@ export default function RfpIctPage() {
                       <tr key={r.rfp_id} className="cursor-pointer" onClick={() => navigate(`/rfp-ict/${r.rfp_id}`)}>
                         <td className="max-w-[190px]">
                           <div className="font-mono text-xs text-blue-600 whitespace-nowrap">{r.rfp_number}</div>
+                          {r.rfp_title && <div className="text-sm text-gray-900 truncate" title={r.rfp_title}>{r.rfp_title}</div>}
                           {r.rfp_ref && <div className="text-xs text-gray-500 truncate" title={r.rfp_ref}>{r.rfp_ref}</div>}
                           {r.channel && <div className="text-xs text-gray-400 truncate">{optionLabel(lists.channel, r.channel, i18n.language)}</div>}
                         </td>

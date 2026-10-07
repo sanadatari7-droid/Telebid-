@@ -84,6 +84,7 @@ LOST_STATUSES = {"LOST", "LOST_TECHNICAL", "LOST_FINANCIAL"}
 
 class RfpIn(BaseModel):
     client_id: int
+    rfp_title: Optional[str] = Field(None, max_length=300)
     rfp_ref: Optional[str] = Field(None, max_length=100)
     channel: Optional[str] = None
     project_type: Optional[str] = None
@@ -308,13 +309,13 @@ async def _write_fields(conn, rfp_id: int, company_id: int, body: RfpIn, v: dict
         UPDATE rfp_ict SET client_id=$1, rfp_ref=$2, channel=$3, project_type=$4, description=$5,
                submission_date=$6, queries_deadline=$7, bid_bond_required=$8, bid_bond_pct=$9,
                am_id=$10, presales_emp_id=$11, bm_id=$12, project_size=$13, tcv=$14,
-               phase=$15, status=$16, reason=$17, winner_name=$18, winner_tcv=$19, updated_at=NOW()
+               phase=$15, status=$16, reason=$17, winner_name=$18, winner_tcv=$19, rfp_title=$22, updated_at=NOW()
         WHERE rfp_id=$20 AND company_id=$21""",
         body.client_id, (body.rfp_ref or "").strip() or None, v["channel"], v["project_type"],
         (body.description or "").strip() or None, body.submission_date, body.queries_deadline,
         body.bid_bond_required, v["pct"], body.am_id, body.presales_emp_id, body.bm_id,
         v["project_size"], body.tcv, v["phase"], v["status"], v["reason"], v["winner_name"], v["winner_tcv"],
-        rfp_id, company_id)
+        rfp_id, company_id, (body.rfp_title or "").strip() or None)
     await _save_scope(conn, rfp_id, v["scope_ids"])
 
 

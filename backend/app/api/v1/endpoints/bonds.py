@@ -88,11 +88,14 @@ async def list_bonds(
         args.append(status); conds.append(f"b.status=${len(args)}")
     where = " AND ".join(conds)
     return await fetch_all(conn, f"""
-        SELECT b.*, o.opp_number, o.customer_name, c.symbol, c.currency_code,
+        SELECT b.*, COALESCE(o.opp_number, ri.rfp_number) AS opp_number,
+               COALESCE(o.customer_name, cl.name_en) AS customer_name, c.symbol, c.currency_code,
                u.full_name AS created_by_name, a.full_name AS approved_by_name,
                (b.expiry_date - CURRENT_DATE)::INT AS days_to_expiry
         FROM opportunity_bonds b
         LEFT JOIN opportunities_v2 o ON b.opp_id=o.opp_id
+        LEFT JOIN rfp_ict ri ON b.rfp_ict_id=ri.rfp_id
+        LEFT JOIN clients cl ON ri.client_id=cl.client_id
         LEFT JOIN currencies c ON b.currency_id=c.currency_id
         LEFT JOIN users u ON b.created_by=u.user_id
         LEFT JOIN users a ON b.approved_by=a.user_id
@@ -181,9 +184,12 @@ async def _send_to_office(conn, bond_id: int, company_id: int) -> dict:
         error = "Email isn't set up yet (System Settings → Email), so the request wasn't sent"
     else:
         bond = await fetch_one(conn, """
-            SELECT b.*, o.opp_number, o.customer_name, c.currency_code
+            SELECT b.*, COALESCE(o.opp_number, ri.rfp_number) AS opp_number,
+                   COALESCE(o.customer_name, cl.name_en) AS customer_name, c.currency_code
             FROM opportunity_bonds b
             LEFT JOIN opportunities_v2 o ON b.opp_id=o.opp_id
+            LEFT JOIN rfp_ict ri ON b.rfp_ict_id=ri.rfp_id
+            LEFT JOIN clients cl ON ri.client_id=cl.client_id
             LEFT JOIN currencies c ON b.currency_id=c.currency_id
             WHERE b.bond_id=$1 AND b.company_id=$2""", bond_id, company_id)
         approvals = [(cfg[f"l{i}_title"], bond[f"l{i}_approver_name"], bond[f"l{i}_approved_at"]) for i in (1, 2, 3)]

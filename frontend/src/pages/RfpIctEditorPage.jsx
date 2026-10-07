@@ -12,9 +12,10 @@ import { apiErrorMessage } from "../utils/apiError"
 import { fmt } from "../utils/fmt"
 import { SCOPE_LEVELS, buildTree, STATUS_STYLE, LOST_STATUSES, optionLabel, formatMoney } from "../utils/rfpIct"
 import RfpEvaluation from "../components/rfp/RfpEvaluation"
+import RfpBidBond from "../components/rfp/RfpBidBond"
 
 const EMPTY = {
-  client_id: "", rfp_ref: "", channel: "", project_type: "", description: "",
+  client_id: "", rfp_title: "", rfp_ref: "", channel: "", project_type: "", description: "",
   submission_date: "", queries_deadline: "", bid_bond_required: false, bid_bond_pct: "",
   scope_ids: [], am_id: "", presales_emp_id: "", bm_id: "",
   project_size: "", tcv: "", phase: "ON_GOING", status: "PENDING", reason: "", winner_name: "", winner_tcv: "",
@@ -217,7 +218,7 @@ export default function RfpIctEditorPage() {
   const { i18n } = useTranslation()
   const lang = i18n.language
   const [params, setParams] = useSearchParams()
-  const tab = !isNew && params.get("tab") === "evaluation" ? "evaluation" : "details"
+  const tab = !isNew && ["evaluation", "bond"].includes(params.get("tab")) ? params.get("tab") : "details"
 
   const { data: meta } = useQuery({ queryKey: ["rfp-ict-lists"], queryFn: () => rfpIctApi.lists().then(r => r.data) })
   const { data: team } = useQuery({ queryKey: ["rfp-ict-team"], queryFn: () => rfpIctApi.teamOptions().then(r => r.data) })
@@ -309,9 +310,9 @@ export default function RfpIctEditorPage() {
             )}
           </div>
           <div className="flex items-center gap-1 ml-4 bg-gray-100 rounded-xl p-1">
-            {[["details", "1 · RFP details"], ["evaluation", "2 · Evaluation"]].map(([id, lbl]) => (
-              <button key={id} disabled={isNew && id === "evaluation"} title={isNew && id === "evaluation" ? "Create the RFP first" : undefined}
-                onClick={() => setParams(id === "evaluation" ? { tab: "evaluation" } : {})}
+            {[["details", "1 · RFP details"], ["evaluation", "2 · Evaluation"], ["bond", "3 · Bid bond"]].map(([id, lbl]) => (
+              <button key={id} disabled={isNew && id !== "details"} title={isNew && id !== "details" ? "Create the RFP first" : undefined}
+                onClick={() => setParams(id === "details" ? {} : { tab: id })}
                 className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
                   tab === id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900")}>
                 {lbl}
@@ -330,6 +331,8 @@ export default function RfpIctEditorPage() {
 
       {tab === "evaluation" ? (
         <div className="max-w-screen-xl mx-auto p-6"><RfpEvaluation rfpId={rfpId}/></div>
+      ) : tab === "bond" ? (
+        <div className="max-w-screen-xl mx-auto p-6"><RfpBidBond rfpId={rfpId} onGoToDetails={() => setParams({})}/></div>
       ) : (
 
       <div className="max-w-screen-xl mx-auto p-6 grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
@@ -363,6 +366,9 @@ export default function RfpIctEditorPage() {
                 )}
               </Field>
             )}
+            <Field label="RFP title" hint="Used as the bid subject on the bid bond">
+              <input className="input" value={form.rfp_title} onChange={e => set("rfp_title", e.target.value)} placeholder="e.g. Hospital campus network refresh"/>
+            </Field>
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="RFP reference" hint="The client's own reference, if any">
                 <input className="input font-mono" value={form.rfp_ref} onChange={e => set("rfp_ref", e.target.value)} placeholder="e.g. SPC-26-0045"/>

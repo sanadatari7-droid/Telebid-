@@ -655,6 +655,20 @@ async def run_migrations():
             PRIMARY KEY (rfp_id, question_id)
         );
         """,
+        # ── Module 2 / Sub-module 3: RFP ICT bid bonds (stored with the other bonds) ──
+        """
+        ALTER TABLE rfp_ict ADD COLUMN IF NOT EXISTS rfp_title VARCHAR(300);
+        ALTER TABLE opportunity_bonds ALTER COLUMN opp_id DROP NOT NULL;
+        ALTER TABLE opportunity_bonds
+            ADD COLUMN IF NOT EXISTS rfp_ict_id     INT REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+            ADD COLUMN IF NOT EXISTS validity_days  INT;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_bonds_rfp_ict ON opportunity_bonds(rfp_ict_id) WHERE rfp_ict_id IS NOT NULL;
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_bond_has_parent') THEN
+                ALTER TABLE opportunity_bonds ADD CONSTRAINT chk_bond_has_parent CHECK (opp_id IS NOT NULL OR rfp_ict_id IS NOT NULL);
+            END IF;
+        END$$;
+        """,
     ]
 
     async with pool.acquire() as conn:
