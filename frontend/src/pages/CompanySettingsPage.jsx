@@ -3,11 +3,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { companyConfigApi, empApi, oppsV2Api, usersApi } from "../services/api"
 import { COUNTRIES } from "../constants/countries"
 import { apiErrorMessage } from "../utils/apiError"
+import { saveDownload } from "../utils/download"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import {
   Building2, Key, Hash, Users, Briefcase, TrendingUp, Shield,
-  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck, Send
+  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck, Send, FileDown
 } from "lucide-react"
 
 // Module 1 (Company) sub-modules first, then the remaining settings.
@@ -574,6 +575,16 @@ function PricingApprovalSection() {
 
 // ── Section D: Bid Bond Approval Cycle (Module 1 / Sub-module D) ─────────────
 // L1 → L2 → L3, then the request is emailed to the Bid Bond Issuance Office.
+const LETTER_FIELDS = [
+  ["letter_title", "Title"],
+  ["letter_to", "To", "e.g. Mr. Nabil Roushdy Younan"],
+  ["letter_from", "From", "e.g. Mr. Abdullah Khorami"],
+  ["letter_intro", "Opening sentence", null, true],
+  ["letter_requester_title", "Requester's role", "e.g. Manager Bids"],
+  ["letter_closing", "Closing"],
+  ["letter_notes", "Notes (printed on every letter)", "Optional", true],
+]
+
 function BondApprovalSection() {
   const qc = useQueryClient()
   const { data: cfg } = useQuery({ queryKey:["bond-approval"], queryFn:()=>companyConfigApi.getBondApproval().then(r=>r.data) })
@@ -585,6 +596,7 @@ function BondApprovalSection() {
     mutationFn: () => companyConfigApi.saveBondApproval({
       l1_title: form.l1_title, l2_title: form.l2_title, l3_title: form.l3_title,
       office_name: form.office_name, office_email: form.office_email || null, auto_send: form.auto_send,
+      ...Object.fromEntries(LETTER_FIELDS.map(([k]) => [k, form[k] ?? ""])),
     }),
     onSuccess: () => { toast.success("Bid bond approval cycle saved"); qc.invalidateQueries({queryKey:["bond-approval"]}) },
     onError: err => toast.error(apiErrorMessage(err, "Failed to save bid bond approval cycle"))
@@ -641,6 +653,32 @@ function BondApprovalSection() {
             <div className="text-xs text-gray-400">When off, someone sends it from the bond with "Send to office".</div>
           </div>
         </label>
+      </div>
+
+      <div className="card space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="section-title">Bid bond request letter (Word)</div>
+            <p className="text-sm text-gray-500">The company's request letter. Its wording is set here once; each bond fills in the
+              details table and the sign-off table (requester plus the three approval levels above) automatically.
+              The letter is attached to the email to the issuance office and can be downloaded from any bond.</p>
+          </div>
+          <button className="btn-secondary btn-sm whitespace-nowrap" onClick={async () => {
+            try { saveDownload(await companyConfigApi.sampleBondLetter(), "Bid Bond Request - sample.docx") }
+            catch { toast.error("Couldn't create the sample letter") }
+          }}><FileDown size={12}/> Sample letter</button>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          {LETTER_FIELDS.map(([k, label, placeholder, multiline]) => (
+            <div key={k} className={multiline ? "col-span-2" : ""}>
+              <label className="label">{label}</label>
+              {multiline
+                ? <textarea className="input" rows={2} value={form[k] || ""} placeholder={placeholder || ""} onChange={e => set(k, e.target.value)}/>
+                : <input className="input" value={form[k] || ""} placeholder={placeholder || ""} onChange={e => set(k, e.target.value)}/>}
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400">Save first, then use "Sample letter" to see the result with your wording.</p>
       </div>
 
       <button className="btn-primary" disabled={saveMut.isPending} onClick={() => saveMut.mutate()}>

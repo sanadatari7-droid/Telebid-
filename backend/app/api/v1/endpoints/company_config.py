@@ -4,6 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_all, fetch_one, execute, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
+from app.services.bond_letter import LETTER_DEFAULTS, build_request_letter, DOCX_MIME
 
 router = APIRouter(prefix="/company-config", tags=["Company Config"])
 
@@ -43,11 +44,20 @@ class BondApprovalUpdate(BaseModel):
     office_name: str = Field("Bid Bond Issuance Office", min_length=1, max_length=150)
     office_email: Optional[str] = Field(None, max_length=500)
     auto_send: bool = True
+    letter_title: Optional[str] = Field(None, max_length=200)
+    letter_to: Optional[str] = Field(None, max_length=200)
+    letter_from: Optional[str] = Field(None, max_length=200)
+    letter_intro: Optional[str] = Field(None, max_length=2000)
+    letter_requester_title: Optional[str] = Field(None, max_length=100)
+    letter_closing: Optional[str] = Field(None, max_length=200)
+    letter_notes: Optional[str] = Field(None, max_length=2000)
 
 BOND_APPROVAL_DEFAULTS = {
     "l1_title": "Bid Department Manager", "l2_title": "VP Sales", "l3_title": "Finance",
     "office_name": "Bid Bond Issuance Office", "office_email": None, "auto_send": True,
+    **LETTER_DEFAULTS,
 }
+LETTER_FIELDS = list(LETTER_DEFAULTS)
 
 _EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 
@@ -222,7 +232,10 @@ async def save_pricing_approval(body: PricingApprovalUpdate, conn=Depends(get_db
 # Bid Bond Approval Cycle (Module 1 / Sub-module D)
 async def get_bond_approval_config(conn, company_id: int) -> dict:
     row = await fetch_one(conn, "SELECT * FROM company_bond_approval WHERE company_id=$1", company_id)
-    return dict(row) if row else {"company_id": company_id, **BOND_APPROVAL_DEFAULTS}
+    if not row:
+        return {"company_id": company_id, **BOND_APPROVAL_DEFAULTS}
+    # Letter wording never saved yet → the template's own wording.
+    return {**row, **{k: (row.get(k) if row.get(k) is not None else v) for k, v in LETTER_DEFAULTS.items()}}
 
 @router.get("/bond-approval")
 async def get_bond_approval(conn=Depends(get_db), current_user=Depends(get_current_user)):
@@ -238,12 +251,39 @@ async def save_bond_approval(body: BondApprovalUpdate, conn=Depends(get_db), cur
     if body.auto_send and not office_email:
         raise HTTPException(status_code=400, detail="Enter the issuance office's email address, or turn off automatic sending")
     await execute(conn, """
-        INSERT INTO company_bond_approval (company_id, l1_title, l2_title, l3_title, office_name, office_email, auto_send, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+        INSERT INTO company_bond_approval (company_id, l1_title, l2_title, l3_title, office_name, office_email, auto_send,
+            letter_title, letter_to, letter_from, letter_intro, letter_requester_title, letter_closing, letter_notes, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
         ON CONFLICT (company_id) DO UPDATE SET
             l1_title=EXCLUDED.l1_title, l2_title=EXCLUDED.l2_title, l3_title=EXCLUDED.l3_title,
-            office_name=EXCLUDED.office_name, office_email=EXCLUDED.office_email,
-            auto_send=EXCLUDED.auto_send, updated_at=NOW()
+            office_name=EXCLUDED.office_name, office_email=EXCLUDED.office_email, auto_send=EXCLUDED.auto_send,
+            letter_title=EXCLUDED.letter_title, letter_to=EXCLUDED.letter_to, letter_from=EXCLUDED.letter_from,
+            letter_intro=EXCLUDED.letter_intro, letter_requester_title=EXCLUDED.letter_requester_title,
+            letter_closing=EXCLUDED.letter_closing, letter_notes=EXCLUDED.letter_notes, updated_at=NOW()
     """, company_id, body.l1_title.strip(), body.l2_title.strip(), body.l3_title.strip(),
-        body.office_name.strip(), office_email, body.auto_send)
+        body.office_name.strip(), office_email, body.auto_send,
+        *[(getattr(body, k) if getattr(body, k) is not None else LETTER_DEFAULTS[k]).strip() for k in LETTER_FIELDS])
     return {"message": "Bid bond approval cycle saved"}
+
+
+@router.get("/bond-approval/sample-letter")
+async def sample_bond_letter(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """The request letter with example bond details, to check the wording before a real bond uses it."""
+    from datetime import date, timedelta
+    from fastapi.responses import Response
+    company_id = require_company(current_user)
+    cfg = await get_bond_approval_config(conn, company_id)
+    co = await fetch_one(conn, """
+        SELECT co.company_initials, COALESCE(co.currency_decimals, 2) AS decimals, cur.currency_code
+        FROM companies co LEFT JOIN currencies cur ON cur.currency_id=co.currency_id WHERE co.company_id=$1""", company_id)
+    today = date.today()
+    sample = {
+        "bid_ref": f"{co['company_initials'] or 'ABC'}-RF: SAMPLE-001", "bid_subject": "Example RFP title",
+        "beneficiary": "Example client", "beneficiary_address": "Example address", "lg_percentage": 1,
+        "lg_base_value": 1000000, "bond_amount": 10000, "submission_date": today + timedelta(days=30),
+        "expiry_date": today + timedelta(days=120), "language": "Arabic", "requester_name": current_user.full_name,
+    }
+    levels = [(cfg[f"l{i}_title"], None, None) for i in (1, 2, 3)]
+    content = build_request_letter(sample, cfg, levels, co["currency_code"] or "", co["decimals"], today)
+    return Response(content, media_type=DOCX_MIME,
+                    headers={"Content-Disposition": 'attachment; filename="Bid Bond Request - sample.docx"'})

@@ -3,6 +3,7 @@ import logging
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,9 @@ async def smtp_configured(company_id: int) -> bool:
     smtp = await _get_smtp_config(company_id)
     return bool(smtp["host"] and smtp["user"])
 
-async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1) -> bool:
+async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1,
+                     attachments: list = None) -> bool:
+    """attachments: [(filename, bytes, mime_type)]"""
     try:
         smtp = await _get_smtp_config(company_id)
     except Exception:
@@ -54,12 +57,21 @@ async def send_email(to: str, subject: str, body_html: str, body_text: str = "",
         logger.info(f"SMTP not configured — skipping email to {to}: {subject}")
         return False
     try:
-        msg = MIMEMultipart("alternative")
+        body = MIMEMultipart("alternative")
+        if body_text: body.attach(MIMEText(body_text,"plain"))
+        body.attach(MIMEText(body_html,"html"))
+        if attachments:
+            msg = MIMEMultipart("mixed")
+            msg.attach(body)
+            for filename, data, mime in attachments:
+                part = MIMEApplication(data, _subtype=mime.split("/", 1)[1])
+                part.add_header("Content-Disposition", "attachment", filename=filename)
+                msg.attach(part)
+        else:
+            msg = body
         msg["Subject"] = subject
         msg["From"] = f"{smtp['from_name']} <{smtp['from_email'] or smtp['user']}>"
         msg["To"] = to
-        if body_text: msg.attach(MIMEText(body_text,"plain"))
-        msg.attach(MIMEText(body_html,"html"))
         await aiosmtplib.send(msg, hostname=smtp["host"], port=smtp["port"],
             username=smtp["user"], password=smtp["password"],
             use_tls=False, start_tls=smtp["use_tls"])
@@ -236,7 +248,7 @@ async def send_ai_alert_email(to: str, full_name: str, headline: str, reason: st
 BOND_TYPE_LABELS = {"NEW_BOND": "New Bond", "BID_BOND": "Bid Bond", "FINAL_BOND": "Final Bond"}
 
 async def send_bond_issuance_request(to: str, office_name: str, bond: dict, approvals: list,
-                                     company_id: int = 1) -> bool:
+                                     company_id: int = 1, attachments: list = None) -> bool:
     """Formal bond request to the Bid Bond Issuance Office, sent once all three
     approval levels have signed off. `approvals` is [(level_title, approver_name, approved_at)]."""
     type_label = BOND_TYPE_LABELS.get(bond.get("bond_type"), bond.get("bond_type") or "Bond")
@@ -278,7 +290,7 @@ async def send_bond_issuance_request(to: str, office_name: str, bond: dict, appr
       </div>
       <div style="background:#f8fafc;padding:28px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">
         <p style="color:#374151;font-size:15px">Dear <strong>{_esc(office_name)}</strong>,</p>
-        <p style="color:#4b5563;font-size:14px">Please issue the following {_esc(type_label.lower())}. It has been approved at all three levels.</p>
+        <p style="color:#4b5563;font-size:14px">Please issue the following {_esc(type_label.lower())}. It has been approved at all three levels.{" The signed-off request letter is attached." if attachments else ""}</p>
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin:16px 0">
           <table style="width:100%;border-collapse:collapse">{rows_html}</table>
         </div>
@@ -294,4 +306,4 @@ async def send_bond_issuance_request(to: str, office_name: str, bond: dict, appr
     text_lines += [f"{k}: {v if v not in (None, '') else '—'}" for k, v in rows]
     text_lines += ["", "Approvals:"] + [f"Level {i} — {t}: {n}" for i, (t, n, _) in enumerate(approvals, 1)]
     subject = f"{type_label} Issuance Request — {bond.get('bid_ref') or bond.get('opp_number')}"
-    return await send_email(to, subject, html, "\n".join(text_lines), company_id=company_id)
+    return await send_email(to, subject, html, "\n".join(text_lines), company_id=company_id, attachments=attachments)

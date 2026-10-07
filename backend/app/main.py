@@ -669,6 +669,17 @@ async def run_migrations():
             END IF;
         END$$;
         """,
+        # ── company_bond_approval: request letter wording ─────────────────────
+        """
+        ALTER TABLE company_bond_approval
+            ADD COLUMN IF NOT EXISTS letter_title            VARCHAR(200),
+            ADD COLUMN IF NOT EXISTS letter_to               VARCHAR(200),
+            ADD COLUMN IF NOT EXISTS letter_from             VARCHAR(200),
+            ADD COLUMN IF NOT EXISTS letter_intro            TEXT,
+            ADD COLUMN IF NOT EXISTS letter_requester_title  VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS letter_closing          VARCHAR(200),
+            ADD COLUMN IF NOT EXISTS letter_notes            TEXT;
+        """,
     ]
 
     async with pool.acquire() as conn:
