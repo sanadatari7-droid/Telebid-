@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { companyConfigApi, empApi, oppsV2Api, usersApi } from "../services/api"
 import { COUNTRIES } from "../constants/countries"
+import { apiErrorMessage } from "../utils/apiError"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import {
@@ -16,11 +17,11 @@ const SECTIONS = [
   { id:"3", num:"3", label:"Reference Model",                    icon:Hash },
   { id:"4", num:"4", label:"Account Managers",                   icon:Users },
   { id:"5", num:"5", label:"Bid Specialists / Managers",         icon:Briefcase },
-  { id:"6", num:"6", label:"Pricing Levels Flow Chart",          icon:TrendingUp },
   { id:"7", num:"7", label:"Bond Approval Flow Chart",           icon:Shield },
   { id:"8", num:"8", label:"Bid Evaluations Questions & Value",  icon:ClipboardList },
   { id:"9", num:"9", label:"EXPRO Feasibility Study",            icon:Microscope },
   { id:"B", num:"B", label:"Evaluators (Module 1 / Sub-B)",      icon:UserCheck },
+  { id:"C", num:"C", label:"Pricing Approval (Module 1 / Sub-C)", icon:TrendingUp },
 ]
 
 // ── Section 1 & 2: Company Info ───────────────────────────────────────────────
@@ -444,26 +445,123 @@ function EvaluatorsSection() {
   )
 }
 
-// ── Section 6: Pricing Levels Flow Chart ─────────────────────────────────────
-function PricingLevelsSection() {
+// ── Section C: Pricing Approval Cycle (Module 1 / Sub-module C) ──────────────
+// L1 → L2 → L3. Telecom escalates on discount %, ICT on margin %.
+// Go / No-Go business case gate is a minimum EBITDA %.
+const PCT_FIELDS = ["telecom_l1_max_discount","telecom_l2_max_discount","ict_l1_min_margin","ict_l2_min_margin","ebitda_min_pct"]
+
+function PctInput({ value, onChange, min = 0 }) {
   return (
-    <div className="card space-y-4">
-      <div className="section-title flex items-center gap-2"><TrendingUp size={13}/> 6 — Pricing Levels Flow Chart</div>
-      <div className="alert-info text-sm">
-        Configure pricing approval thresholds. Bids above each threshold require additional approval.
+    <div className="relative w-28">
+      <input type="number" step="0.01" min={min} max="100" className="input pr-7 text-right tabular-nums"
+        value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder="—"/>
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+    </div>
+  )
+}
+
+function RuleRow({ level, title, children }) {
+  return (
+    <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="badge-blue flex-shrink-0">{level}</span>
+        <span className="text-sm font-semibold text-gray-900 truncate">{title}</span>
       </div>
-      <div className="space-y-3">
-        {[["Level 1 — Manager","Up to $50,000"],["Level 2 — Director","$50,001 – $500,000"],["Level 3 — VP/Chief","Above $500,000"]].map(([l,r])=>(
-          <div key={l} className="flex items-center justify-between p-3.5 rounded-xl border border-gray-100 bg-gray-50">
-            <div>
-              <div className="text-sm font-semibold text-gray-900">{l}</div>
-              <div className="text-xs text-gray-400">{r}</div>
-            </div>
-            <ChevronRight size={16} className="text-gray-300"/>
+      <div className="flex items-center gap-2 text-sm text-gray-500 flex-shrink-0">{children}</div>
+    </div>
+  )
+}
+
+function PricingApprovalSection() {
+  const qc = useQueryClient()
+  const { data: cfg } = useQuery({ queryKey:["pricing-approval"], queryFn:()=>companyConfigApi.getPricingApproval().then(r=>r.data) })
+  const { data: company } = useQuery({ queryKey:["company-cfg"], queryFn:()=>companyConfigApi.get().then(r=>r.data) })
+  const [form, setForm] = useState(null)
+  useEffect(() => { if (cfg) setForm({ ...cfg }) }, [cfg])
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  const saveMut = useMutation({
+    mutationFn: () => {
+      const payload = { l1_title: form.l1_title, l2_title: form.l2_title, l3_title: form.l3_title }
+      PCT_FIELDS.forEach(k => { payload[k] = form[k] === "" || form[k] == null ? null : Number(form[k]) })
+      return companyConfigApi.savePricingApproval(payload)
+    },
+    onSuccess: () => { toast.success("Pricing approval cycle saved"); qc.invalidateQueries({queryKey:["pricing-approval"]}) },
+    onError: err => toast.error(apiErrorMessage(err, "Failed to save pricing approval cycle"))
+  })
+
+  if (!form) return null
+
+  // Show only the service lines the company offers (Sub-module A); both if not set yet.
+  const noneSet = !company?.services_ict && !company?.services_telecom
+  const showTelecom = noneSet || company?.services_telecom
+  const showIct = noneSet || company?.services_ict
+  const titles = [form.l1_title, form.l2_title, form.l3_title]
+
+  return (
+    <div className="space-y-6">
+      <div className="card space-y-4">
+        <div className="section-title flex items-center gap-2"><TrendingUp size={13}/> C — Pricing Approval Cycle</div>
+        <div className="alert-info text-xs">
+          Pricing is approved in sequence. Each level's title can be renamed to match your organisation.
+        </div>
+        <div className="flex items-stretch gap-2">
+          {["l1_title","l2_title","l3_title"].map((k, i) => (
+            <React.Fragment key={k}>
+              {i > 0 && <ChevronRight size={16} className="text-gray-300 self-center flex-shrink-0"/>}
+              <div className="flex-1 p-3 rounded-xl border border-gray-200 bg-white">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Level {i+1}</div>
+                <input className="input" value={form[k] || ""} onChange={e => set(k, e.target.value)}/>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
+      {showTelecom && (
+        <div className="card space-y-3">
+          <div className="section-title">Telecom — approval by discount %</div>
+          <RuleRow level="L1" title={titles[0]}>
+            approves discounts up to <PctInput value={form.telecom_l1_max_discount} onChange={v => set("telecom_l1_max_discount", v)}/>
+          </RuleRow>
+          <RuleRow level="L2" title={titles[1]}>
+            approves discounts up to <PctInput value={form.telecom_l2_max_discount} onChange={v => set("telecom_l2_max_discount", v)}/>
+          </RuleRow>
+          <RuleRow level="L3" title={titles[2]}>
+            approves any discount above {form.telecom_l2_max_discount !== "" && form.telecom_l2_max_discount != null ? `${form.telecom_l2_max_discount}%` : "Level 2's limit"}
+          </RuleRow>
+        </div>
+      )}
+
+      {showIct && (
+        <div className="card space-y-3">
+          <div className="section-title">ICT — approval by margin %</div>
+          <RuleRow level="L1" title={titles[0]}>
+            approves margins of at least <PctInput value={form.ict_l1_min_margin} onChange={v => set("ict_l1_min_margin", v)}/>
+          </RuleRow>
+          <RuleRow level="L2" title={titles[1]}>
+            approves margins of at least <PctInput value={form.ict_l2_min_margin} onChange={v => set("ict_l2_min_margin", v)}/>
+          </RuleRow>
+          <RuleRow level="L3" title={titles[2]}>
+            approves any margin below {form.ict_l2_min_margin !== "" && form.ict_l2_min_margin != null ? `${form.ict_l2_min_margin}%` : "Level 2's limit"}
+          </RuleRow>
+        </div>
+      )}
+
+      <div className="card space-y-3">
+        <div className="section-title">Business case — Go / No-Go</div>
+        <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Minimum EBITDA margin to Go</div>
+            <div className="text-xs text-gray-400">Earnings Before Interest, Taxes, Depreciation &amp; Amortization, as a % of revenue. Below this is a No-Go.</div>
           </div>
-        ))}
+          <PctInput value={form.ebitda_min_pct} onChange={v => set("ebitda_min_pct", v)} min={-100}/>
+        </div>
       </div>
-      <p className="text-xs text-gray-400">Configure approval thresholds in System Settings → Approval Configuration.</p>
+
+      <button className="btn-primary" disabled={saveMut.isPending} onClick={() => saveMut.mutate()}>
+        <Check size={13}/> {saveMut.isPending ? "Saving…" : "Save Pricing Approval Cycle"}
+      </button>
     </div>
   )
 }
@@ -582,11 +680,11 @@ export default function CompanySettingsPage() {
           {active==="3" ? <RefModelSection/> : null}
           {active==="4" ? <PeopleSection type="am"/> : null}
           {active==="5" ? <PeopleSection type="bm"/> : null}
-          {active==="6" ? <PricingLevelsSection/> : null}
           {active==="7" ? <BondApprovalSection/> : null}
           {active==="8" ? <BidEvalSection/> : null}
           {active==="9" ? <ExproFeasibilitySection/> : null}
           {active==="B" ? <EvaluatorsSection/> : null}
+          {active==="C" ? <PricingApprovalSection/> : null}
         </div>
       </div>
     </div>

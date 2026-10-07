@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_all, fetch_one, execute, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 
@@ -24,6 +24,22 @@ class EvaluatorCreate(BaseModel):
     full_name: str
     email: Optional[str] = None
     title: str
+
+class PricingApprovalUpdate(BaseModel):
+    l1_title: str = Field("Bid Department Manager", min_length=1, max_length=100)
+    l2_title: str = Field("Sales VP", min_length=1, max_length=100)
+    l3_title: str = Field("Finance", min_length=1, max_length=100)
+    telecom_l1_max_discount: Optional[float] = Field(None, ge=0, le=100)
+    telecom_l2_max_discount: Optional[float] = Field(None, ge=0, le=100)
+    ict_l1_min_margin: Optional[float] = Field(None, ge=0, le=100)
+    ict_l2_min_margin: Optional[float] = Field(None, ge=0, le=100)
+    ebitda_min_pct: Optional[float] = Field(None, ge=-100, le=100)
+
+PRICING_DEFAULTS = {
+    "l1_title": "Bid Department Manager", "l2_title": "Sales VP", "l3_title": "Finance",
+    "telecom_l1_max_discount": None, "telecom_l2_max_discount": None,
+    "ict_l1_min_margin": None, "ict_l2_min_margin": None, "ebitda_min_pct": None,
+}
 
 class CompanyUpdate(BaseModel):
     company_name: Optional[str] = None
@@ -145,3 +161,34 @@ async def remove_evaluator(evaluator_id: int, conn=Depends(get_db), current_user
     result = await execute(conn, "UPDATE company_evaluators SET is_active=FALSE WHERE evaluator_id=$1 AND company_id=$2", evaluator_id, company_id)
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Evaluator not found")
     return {"message": "Removed"}
+
+# Pricing Approval Cycle (Module 1 / Sub-module C)
+@router.get("/pricing-approval")
+async def get_pricing_approval(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    row = await fetch_one(conn, "SELECT * FROM company_pricing_approval WHERE company_id=$1", company_id)
+    return row or {"company_id": company_id, **PRICING_DEFAULTS}
+
+@router.put("/pricing-approval")
+async def save_pricing_approval(body: PricingApprovalUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
+    d1, d2 = body.telecom_l1_max_discount, body.telecom_l2_max_discount
+    if d1 is not None and d2 is not None and d1 > d2:
+        raise HTTPException(status_code=400, detail="Telecom: Level 2's maximum discount must be at least Level 1's")
+    m1, m2 = body.ict_l1_min_margin, body.ict_l2_min_margin
+    if m1 is not None and m2 is not None and m1 < m2:
+        raise HTTPException(status_code=400, detail="ICT: Level 2's minimum margin must not be higher than Level 1's")
+    await execute(conn, """
+        INSERT INTO company_pricing_approval
+            (company_id, l1_title, l2_title, l3_title, telecom_l1_max_discount, telecom_l2_max_discount,
+             ict_l1_min_margin, ict_l2_min_margin, ebitda_min_pct, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+        ON CONFLICT (company_id) DO UPDATE SET
+            l1_title=EXCLUDED.l1_title, l2_title=EXCLUDED.l2_title, l3_title=EXCLUDED.l3_title,
+            telecom_l1_max_discount=EXCLUDED.telecom_l1_max_discount,
+            telecom_l2_max_discount=EXCLUDED.telecom_l2_max_discount,
+            ict_l1_min_margin=EXCLUDED.ict_l1_min_margin, ict_l2_min_margin=EXCLUDED.ict_l2_min_margin,
+            ebitda_min_pct=EXCLUDED.ebitda_min_pct, updated_at=NOW()
+    """, company_id, body.l1_title.strip(), body.l2_title.strip(), body.l3_title.strip(),
+        d1, d2, m1, m2, body.ebitda_min_pct)
+    return {"message": "Pricing approval cycle saved"}

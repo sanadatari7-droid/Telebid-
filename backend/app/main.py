@@ -509,6 +509,21 @@ async def run_migrations():
             created_at   TIMESTAMPTZ DEFAULT NOW()
         );
         """,
+        # ── company_pricing_approval table: Module 1 / Sub-module C ─────────────
+        """
+        CREATE TABLE IF NOT EXISTS company_pricing_approval (
+            company_id               INT PRIMARY KEY REFERENCES companies(company_id),
+            l1_title                 VARCHAR(100) NOT NULL DEFAULT 'Bid Department Manager',
+            l2_title                 VARCHAR(100) NOT NULL DEFAULT 'Sales VP',
+            l3_title                 VARCHAR(100) NOT NULL DEFAULT 'Finance',
+            telecom_l1_max_discount  NUMERIC(5,2),
+            telecom_l2_max_discount  NUMERIC(5,2),
+            ict_l1_min_margin        NUMERIC(5,2),
+            ict_l2_min_margin        NUMERIC(5,2),
+            ebitda_min_pct           NUMERIC(6,2),
+            updated_at               TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
     ]
 
     async with pool.acquire() as conn:

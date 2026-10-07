@@ -392,6 +392,8 @@ export const companyConfigApi = {
   getEvaluators:    () => api.get("/company-config/evaluators"),
   addEvaluator:     d => api.post("/company-config/evaluators", d),
   removeEvaluator:  id => api.delete(`/company-config/evaluators/${id}`),
+  getPricingApproval:  () => api.get("/company-config/pricing-approval"),
+  savePricingApproval: d => api.put("/company-config/pricing-approval", d),
 }
 
 // ── WON RECORDS ───────────────────────────────────────────────────────────────
