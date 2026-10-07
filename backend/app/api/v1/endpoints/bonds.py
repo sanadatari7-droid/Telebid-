@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
 from typing import Optional
 from datetime import date
 from pydantic import BaseModel, Field
@@ -8,7 +7,6 @@ from app.db.postgres import get_db, fetch_all, fetch_one, execute, fetch_val, re
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 from app.api.v1.endpoints.company_config import get_bond_approval_config
 from app.services.email_service import send_bond_issuance_request, smtp_configured
-from app.services.bond_letter import build_request_letter, letter_filename, DOCX_MIME
 
 router = APIRouter(prefix="/bonds", tags=["Bonds"])
 
@@ -175,27 +173,6 @@ async def update_bond(bond_id: int, body: BondUpdate, conn=Depends(get_db), curr
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bond not found")
     return {"message": "Updated"}
 
-async def _letter(conn, bond: dict, company_id: int, cfg: dict) -> bytes:
-    decimals = await fetch_val(conn, "SELECT COALESCE(currency_decimals, 2) FROM companies WHERE company_id=$1", company_id)
-    levels = [(cfg[f"l{i}_title"], bond.get(f"l{i}_approver_name"), bond.get(f"l{i}_approved_at")) for i in (1, 2, 3)]
-    return build_request_letter(bond, cfg, levels, bond.get("currency_code") or "", decimals or 2, date.today())
-
-
-@router.get("/{bond_id}/request-letter")
-async def bond_request_letter(bond_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    """The bid bond request letter (Word), filled from the bond, showing the approvals so far."""
-    company_id = require_company(current_user)
-    bond = await fetch_one(conn, """
-        SELECT b.*, c.currency_code FROM opportunity_bonds b
-        LEFT JOIN currencies c ON b.currency_id=c.currency_id
-        WHERE b.bond_id=$1 AND b.company_id=$2""", bond_id, company_id)
-    if not bond: raise HTTPException(status_code=404, detail="Bond not found")
-    content = await _letter(conn, bond, company_id, await get_bond_approval_config(conn, company_id))
-    filename = letter_filename(bond)
-    return Response(content, media_type=DOCX_MIME,
-                    headers={"Content-Disposition": f"attachment; filename=\"{filename}\""})
-
-
 async def _send_to_office(conn, bond_id: int, company_id: int) -> dict:
     """Email the approved request to the Bid Bond Issuance Office. On success the
     bond moves to REQUESTED; on failure the reason is stored so it shows on the bond."""
@@ -216,9 +193,7 @@ async def _send_to_office(conn, bond_id: int, company_id: int) -> dict:
             LEFT JOIN currencies c ON b.currency_id=c.currency_id
             WHERE b.bond_id=$1 AND b.company_id=$2""", bond_id, company_id)
         approvals = [(cfg[f"l{i}_title"], bond[f"l{i}_approver_name"], bond[f"l{i}_approved_at"]) for i in (1, 2, 3)]
-        letter = await _letter(conn, bond, company_id, cfg)
-        if not await send_bond_issuance_request(cfg["office_email"], cfg["office_name"], bond, approvals, company_id=company_id,
-                                                attachments=[(letter_filename(bond), letter, DOCX_MIME)]):
+        if not await send_bond_issuance_request(cfg["office_email"], cfg["office_name"], bond, approvals, company_id=company_id):
             error = "The email server didn't accept the message — check the office address and email settings, then send again"
 
     if error:

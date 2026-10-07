@@ -1981,14 +1981,3 @@ DO $$ BEGIN
         ALTER TABLE opportunity_bonds ADD CONSTRAINT chk_bond_has_parent CHECK (opp_id IS NOT NULL OR rfp_ict_id IS NOT NULL);
     END IF;
 END$$;
-
-
--- Bid bond request letter wording, edited once (Module 1 / Sub-module D)
-ALTER TABLE company_bond_approval
-    ADD COLUMN IF NOT EXISTS letter_title            VARCHAR(200),
-    ADD COLUMN IF NOT EXISTS letter_to               VARCHAR(200),
-    ADD COLUMN IF NOT EXISTS letter_from             VARCHAR(200),
-    ADD COLUMN IF NOT EXISTS letter_intro            TEXT,
-    ADD COLUMN IF NOT EXISTS letter_requester_title  VARCHAR(100),
-    ADD COLUMN IF NOT EXISTS letter_closing          VARCHAR(200),
-    ADD COLUMN IF NOT EXISTS letter_notes            TEXT;

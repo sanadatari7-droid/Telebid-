@@ -2,11 +2,10 @@ import React from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import clsx from "clsx"
-import { Check, AlertTriangle, Send, FileText } from "lucide-react"
+import { Check, AlertTriangle, Send } from "lucide-react"
 import { bondsApi, companyConfigApi } from "../../services/api"
 import { apiErrorMessage } from "../../utils/apiError"
 import { fmtDT } from "../../utils/fmt"
-import { saveDownload } from "../../utils/download"
 
 const DEFAULT_TITLES = ["Bid Department Manager", "VP Sales", "Finance"]
 
@@ -101,12 +100,6 @@ export default function ApprovalCycle({ bond, onChange }) {
           <Send size={11}/> Send again
         </button>
       )}
-      <button className="btn-secondary btn-sm w-full justify-center" onClick={async () => {
-        try { saveDownload(await bondsApi.requestLetter(bond.bond_id), "Bid Bond Request.docx") }
-        catch (err) { toast.error("Couldn't create the request letter") }
-      }}>
-        <FileText size={12}/> Download request letter (Word)
-      </button>
     </div>
   )
 }

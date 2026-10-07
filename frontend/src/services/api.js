@@ -353,7 +353,6 @@ export const bondsApi = {
   stats:   () => api.get("/bonds/stats/summary"),
   approveLevel: (id, level) => api.post(`/bonds/${id}/approve-level/${level}`),
   sendToOffice: id => api.post(`/bonds/${id}/send-to-office`),
-  requestLetter: id => api.get(`/bonds/${id}/request-letter`, { responseType: "blob" }),
 }
 
 // ── AI ALERTS (scheduler) ─────────────────────────────────────────────────────
@@ -424,7 +423,6 @@ export const companyConfigApi = {
   savePricingApproval: d => api.put("/company-config/pricing-approval", d),
   getBondApproval:     () => api.get("/company-config/bond-approval"),
   saveBondApproval:    d => api.put("/company-config/bond-approval", d),
-  sampleBondLetter:    () => api.get("/company-config/bond-approval/sample-letter", { responseType: "blob" }),
 }
 
 // ── WON RECORDS ───────────────────────────────────────────────────────────────
