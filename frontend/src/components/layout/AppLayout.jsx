@@ -21,6 +21,8 @@ const NAV_SECTIONS = [
       { label: "Dashboard", tKey: "nav.dashboard", path: "/dashboard",  icon: LayoutDashboard, badge: null },
       // Module 1 (Company) — set up first, so it sits at the top.
       { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2 },
+      // Module 2 (RFP ICT)
+      { label: "RFP ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor },
     ]
   },
   {

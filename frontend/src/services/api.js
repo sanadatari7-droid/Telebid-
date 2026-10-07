@@ -378,6 +378,24 @@ export const serviceCatsApi = {
   delete: id => api.delete(`/service-categories/${id}`),
 }
 
+// ── MODULE 2: RFP ICT ─────────────────────────────────────────────────────────
+export const clientsApi = {
+  list:      () => api.get("/clients"),
+  create:    d => api.post("/clients", d),
+  update:    (id, d) => api.put(`/clients/${id}`, d),
+  translate: (text, kind) => api.post("/translate/arabic", { text, kind }),
+}
+export const rfpIctApi = {
+  list:        () => api.get("/rfp-ict"),
+  get:         id => api.get(`/rfp-ict/${id}`),
+  create:      d => api.post("/rfp-ict", d),
+  update:      (id, d) => api.put(`/rfp-ict/${id}`, d),
+  delete:      id => api.delete(`/rfp-ict/${id}`),
+  scopeOptions:      () => api.get("/rfp-ict/scope-options"),
+  addScopeOption:    d => api.post("/rfp-ict/scope-options", d),
+  removeScopeOption: id => api.delete(`/rfp-ict/scope-options/${id}`),
+}
+
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────
 export const companyConfigApi = {
   get:         () => api.get("/company-config"),

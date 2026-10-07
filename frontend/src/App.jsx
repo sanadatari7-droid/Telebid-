@@ -33,6 +33,7 @@ const OpportunitiesV2Page= lazy(() => import("./pages/OpportunitiesV2Page"))
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"))
 const LostRecordsPage = lazy(() => import("./pages/LostRecordsPage"))
 const CompanySettingsPage = lazy(() => import("./pages/CompanySettingsPage"))
+const RfpIctPage          = lazy(() => import("./pages/RfpIctPage"))
 const BondsPage           = lazy(() => import("./pages/BondsPage"))
 const WonRecordsPage      = lazy(() => import("./pages/WonRecordsPage"))
 const AiAlertsPage        = lazy(() => import("./pages/AiAlertsPage"))
@@ -109,6 +110,7 @@ export default function App() {
           <Route path="audit-log" element={<Page component={AuditLogPage}/>}/>
           <Route path="rfp-bids"         element={<Page component={OpportunitiesV2Page}/>}/>
           <Route path="company-settings" element={<Page component={CompanySettingsPage}/>}/>
+          <Route path="rfp-ict"          element={<Page component={RfpIctPage}/>}/>
           <Route path="bonds"            element={<Page component={BondsPage}/>}/>
           <Route path="won-records"      element={<Page component={WonRecordsPage}/>}/>
           <Route path="ai-alerts"        element={<Page component={AiAlertsPage}/>}/>

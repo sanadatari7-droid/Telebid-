@@ -554,6 +554,43 @@ async def run_migrations():
             ADD COLUMN IF NOT EXISTS office_sent_to      VARCHAR(500),
             ADD COLUMN IF NOT EXISTS office_send_error   TEXT;
         """,
+        # ── Module 2 (RFP ICT): clients, RFPs, scope selections ────────────────
+        """
+        CREATE TABLE IF NOT EXISTS clients (
+            client_id           SERIAL PRIMARY KEY,
+            company_id          INT NOT NULL REFERENCES companies(company_id),
+            name_en             VARCHAR(200) NOT NULL,
+            name_ar             VARCHAR(200),
+            billing_address_en  TEXT,
+            billing_address_ar  TEXT,
+            is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by          INT REFERENCES users(user_id),
+            created_at          TIMESTAMPTZ DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_clients_company_id ON clients(company_id);
+        CREATE SEQUENCE IF NOT EXISTS rfp_ict_number_seq START WITH 1;
+        CREATE TABLE IF NOT EXISTS rfp_ict (
+            rfp_id             SERIAL PRIMARY KEY,
+            company_id         INT NOT NULL REFERENCES companies(company_id),
+            rfp_number         VARCHAR(30) NOT NULL UNIQUE,
+            client_id          INT NOT NULL REFERENCES clients(client_id),
+            submission_date    DATE NOT NULL,
+            queries_deadline   DATE,
+            bid_bond_required  BOOLEAN NOT NULL DEFAULT FALSE,
+            bid_bond_pct       NUMERIC(4,2),
+            created_by         INT REFERENCES users(user_id),
+            created_at         TIMESTAMPTZ DEFAULT NOW(),
+            updated_at         TIMESTAMPTZ DEFAULT NOW(),
+            CHECK (bid_bond_required = (bid_bond_pct IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_rfp_ict_company_id ON rfp_ict(company_id);
+        CREATE TABLE IF NOT EXISTS rfp_ict_scope (
+            rfp_id  INT NOT NULL REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+            cat_id  INT NOT NULL REFERENCES service_categories(cat_id),
+            PRIMARY KEY (rfp_id, cat_id)
+        );
+        """,
     ]
 
     async with pool.acquire() as conn:
