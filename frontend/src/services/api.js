@@ -389,6 +389,9 @@ export const companyConfigApi = {
   getBMs:   () => api.get("/company-config/bid-managers"),
   addBM:    d => api.post("/company-config/bid-managers", d),
   removeBM: id => api.delete(`/company-config/bid-managers/${id}`),
+  getEvaluators:    () => api.get("/company-config/evaluators"),
+  addEvaluator:     d => api.post("/company-config/evaluators", d),
+  removeEvaluator:  id => api.delete(`/company-config/evaluators/${id}`),
 }
 
 // ── WON RECORDS ───────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import toast from "react-hot-toast"
 import clsx from "clsx"
 import {
   Building2, Key, Hash, Users, Briefcase, TrendingUp, Shield,
-  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2
+  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck
 } from "lucide-react"
 
 // 9 sections exactly as in Image 2
@@ -20,6 +20,7 @@ const SECTIONS = [
   { id:"7", num:"7", label:"Bond Approval Flow Chart",           icon:Shield },
   { id:"8", num:"8", label:"Bid Evaluations Questions & Value",  icon:ClipboardList },
   { id:"9", num:"9", label:"EXPRO Feasibility Study",            icon:Microscope },
+  { id:"B", num:"B", label:"Evaluators (Module 1 / Sub-B)",      icon:UserCheck },
 ]
 
 // ── Section 1 & 2: Company Info ───────────────────────────────────────────────
@@ -364,6 +365,85 @@ function PeopleSection({ type }) {
   )
 }
 
+// ── Section B: Evaluators (Module 1 / Sub-module B) ──────────────────────────
+// Repeatable Name / Email / Title records. Title is later selectable in
+// Module 2 (RFP ICT)'s evaluation process.
+function EvaluatorsSection() {
+  const qc = useQueryClient()
+  const { data: items = [] } = useQuery({
+    queryKey: ["company-evaluators"],
+    queryFn: () => companyConfigApi.getEvaluators().then(r=>r.data)
+  })
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState({ full_name:"", email:"", title:"" })
+
+  const addMut = useMutation({
+    mutationFn: () => companyConfigApi.addEvaluator(form),
+    onSuccess: () => {
+      toast.success("Evaluator added")
+      qc.invalidateQueries({queryKey:["company-evaluators"]})
+      setShowAdd(false); setForm({ full_name:"", email:"", title:"" })
+    },
+    onError: err => toast.error(err?.response?.data?.detail || "Failed to add evaluator")
+  })
+  const removeMut = useMutation({
+    mutationFn: id => companyConfigApi.removeEvaluator(id),
+    onSuccess: () => { toast.success("Removed"); qc.invalidateQueries({queryKey:["company-evaluators"]}) }
+  })
+
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="section-title mb-0 flex items-center gap-2"><UserCheck size={13}/> B — Evaluators</div>
+        <button className="btn-primary btn-sm" onClick={()=>setShowAdd(!showAdd)}>
+          <Plus size={12}/> Add
+        </button>
+      </div>
+      <div className="alert-info text-xs">
+        Each evaluator's Title is selectable later in Module 2 (RFP ICT)'s evaluation process.
+      </div>
+
+      {showAdd && (
+        <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className="label">Name *</label><input className="input" value={form.full_name} onChange={e=>setForm(p=>({...p,full_name:e.target.value}))}/></div>
+            <div><label className="label">Email</label><input className="input" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/></div>
+            <div><label className="label">Title *</label><input className="input" value={form.title} onChange={e=>setForm(p=>({...p,title:e.target.value}))}/></div>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-primary btn-sm" disabled={!form.full_name||!form.title||addMut.isPending} onClick={()=>addMut.mutate()}>
+              <Plus size={12}/> {addMut.isPending?"Adding…":"Add"}
+            </button>
+            <button className="btn-ghost btn-sm" onClick={()=>setShowAdd(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {items.length===0 ? (
+        <div className="text-center py-6 text-sm text-gray-400">No evaluators configured</div>
+      ) : (
+        <div className="space-y-2">
+          {items.map(m=>(
+            <div key={m.evaluator_id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                {m.full_name?.slice(0,2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-gray-900">{m.full_name}</div>
+                <div className="text-xs text-gray-400">{m.email}</div>
+              </div>
+              <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{m.title}</span>
+              <button className="btn-ghost btn-sm text-red-400" onClick={()=>removeMut.mutate(m.evaluator_id)}>
+                <Trash2 size={12}/>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Section 6: Pricing Levels Flow Chart ─────────────────────────────────────
 function PricingLevelsSection() {
   return (
@@ -506,6 +586,7 @@ export default function CompanySettingsPage() {
           {active==="7" ? <BondApprovalSection/> : null}
           {active==="8" ? <BidEvalSection/> : null}
           {active==="9" ? <ExproFeasibilitySection/> : null}
+          {active==="B" ? <EvaluatorsSection/> : null}
         </div>
       </div>
     </div>

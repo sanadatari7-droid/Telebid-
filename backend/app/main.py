@@ -495,6 +495,20 @@ async def run_migrations():
             END IF;
         END$$;
         """,
+        # ── company_evaluators table: Module 1 / Sub-module B ───────────────────
+        # Repeatable name/email/title records; "title" is later selectable in
+        # Module 2 (RFP ICT)'s evaluation process.
+        """
+        CREATE TABLE IF NOT EXISTS company_evaluators (
+            evaluator_id SERIAL PRIMARY KEY,
+            company_id   INT REFERENCES companies(company_id) DEFAULT 1,
+            full_name    VARCHAR(150) NOT NULL,
+            email        VARCHAR(150),
+            title        VARCHAR(150) NOT NULL,
+            is_active    BOOLEAN DEFAULT TRUE,
+            created_at   TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
     ]
 
     async with pool.acquire() as conn:

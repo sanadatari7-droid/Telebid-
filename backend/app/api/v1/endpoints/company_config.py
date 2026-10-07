@@ -20,6 +20,11 @@ class BMCreate(BaseModel):
     initials: Optional[str] = None
     email: Optional[str] = None
 
+class EvaluatorCreate(BaseModel):
+    full_name: str
+    email: Optional[str] = None
+    title: str
+
 class CompanyUpdate(BaseModel):
     company_name: Optional[str] = None
     company_name_ar: Optional[str] = None
@@ -118,4 +123,25 @@ async def remove_bm(bm_id: int, conn=Depends(get_db), current_user=Depends(requi
     company_id = require_company(current_user)
     result = await execute(conn, "UPDATE company_bid_managers SET is_active=FALSE WHERE bm_id=$1 AND company_id=$2", bm_id, company_id)
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Bid manager not found")
+    return {"message": "Removed"}
+
+# Evaluators (Module 1 / Sub-module B) — "title" is referenced by Module 2's evaluation process
+@router.get("/evaluators")
+async def list_evaluators(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    return await fetch_all(conn, "SELECT * FROM company_evaluators WHERE company_id=$1 AND is_active=TRUE ORDER BY full_name", company_id)
+
+@router.post("/evaluators", status_code=201)
+async def add_evaluator(body: EvaluatorCreate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
+    await execute(conn,
+        "INSERT INTO company_evaluators (company_id, full_name, email, title) VALUES ($1,$2,$3,$4)",
+        company_id, body.full_name, body.email, body.title)
+    return {"message": "Evaluator added"}
+
+@router.delete("/evaluators/{evaluator_id}")
+async def remove_evaluator(evaluator_id: int, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
+    result = await execute(conn, "UPDATE company_evaluators SET is_active=FALSE WHERE evaluator_id=$1 AND company_id=$2", evaluator_id, company_id)
+    if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Evaluator not found")
     return {"message": "Removed"}
