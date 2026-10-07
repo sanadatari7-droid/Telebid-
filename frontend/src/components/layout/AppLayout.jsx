@@ -204,7 +204,11 @@ export default function AppLayout() {
 
   // Get breadcrumb label
   const pathParts = location.pathname.split("/").filter(Boolean)
-  const breadcrumb = pathParts.map(p => p.charAt(0).toUpperCase() + p.slice(1).replace(/-/g, " "))
+  const navItem = p => NAV_SECTIONS.flatMap(s => s.items).find(i => i.path === `/${p}`)
+  const breadcrumb = pathParts.map(p => {
+    const item = navItem(p)
+    return item ? t(item.tKey) : p.charAt(0).toUpperCase() + p.slice(1).replace(/-/g, " ")
+  })
 
   const SidebarContent = () => (
     <>
