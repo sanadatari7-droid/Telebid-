@@ -591,6 +591,26 @@ async def run_migrations():
             PRIMARY KEY (rfp_id, cat_id)
         );
         """,
+        # ── rfp_ict: File 2 (bid log) fields; clients.is_strategic ─────────────
+        """
+        -- File 2 (bid log) fields for Module 2
+        ALTER TABLE rfp_ict
+            ADD COLUMN IF NOT EXISTS rfp_ref          VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS channel          VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS project_type     VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS description      TEXT,
+            ADD COLUMN IF NOT EXISTS am_id            INT REFERENCES company_account_managers(am_id),
+            ADD COLUMN IF NOT EXISTS presales_emp_id  INT REFERENCES employees(emp_id),
+            ADD COLUMN IF NOT EXISTS bm_id            INT REFERENCES company_bid_managers(bm_id),
+            ADD COLUMN IF NOT EXISTS phase            VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS status           VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS reason           VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS project_size     VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS tcv              NUMERIC(18,4),
+            ADD COLUMN IF NOT EXISTS winner_name      VARCHAR(200),
+            ADD COLUMN IF NOT EXISTS winner_tcv       NUMERIC(18,4);
+        ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_strategic BOOLEAN NOT NULL DEFAULT FALSE;
+        """,
     ]
 
     async with pool.acquire() as conn:

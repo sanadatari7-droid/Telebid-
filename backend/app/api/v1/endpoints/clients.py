@@ -15,6 +15,7 @@ class ClientIn(BaseModel):
     name_ar: Optional[str] = Field(None, max_length=200)
     billing_address_en: Optional[str] = Field(None, max_length=1000)
     billing_address_ar: Optional[str] = Field(None, max_length=1000)
+    is_strategic: bool = False
 
 
 class TranslateIn(BaseModel):
@@ -44,10 +45,10 @@ async def create_client(body: ClientIn, conn=Depends(get_db), current_user=Depen
     if exists:
         raise HTTPException(status_code=400, detail=f"A client named \"{name_en}\" already exists — pick it from the list")
     client_id = await fetch_val(conn, """
-        INSERT INTO clients (company_id, name_en, name_ar, billing_address_en, billing_address_ar, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6) RETURNING client_id""",
+        INSERT INTO clients (company_id, name_en, name_ar, billing_address_en, billing_address_ar, is_strategic, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING client_id""",
         company_id, name_en, _clean(body.name_ar), _clean(body.billing_address_en),
-        _clean(body.billing_address_ar), current_user.user_id)
+        _clean(body.billing_address_ar), body.is_strategic, current_user.user_id)
     return await fetch_one(conn, "SELECT * FROM clients WHERE client_id=$1", client_id)
 
 
@@ -55,10 +56,11 @@ async def create_client(body: ClientIn, conn=Depends(get_db), current_user=Depen
 async def update_client(client_id: int, body: ClientIn, conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
     result = await execute(conn, """
-        UPDATE clients SET name_en=$1, name_ar=$2, billing_address_en=$3, billing_address_ar=$4, updated_at=NOW()
-        WHERE client_id=$5 AND company_id=$6 AND is_active=TRUE""",
+        UPDATE clients SET name_en=$1, name_ar=$2, billing_address_en=$3, billing_address_ar=$4,
+               is_strategic=$5, updated_at=NOW()
+        WHERE client_id=$6 AND company_id=$7 AND is_active=TRUE""",
         body.name_en.strip(), _clean(body.name_ar), _clean(body.billing_address_en),
-        _clean(body.billing_address_ar), client_id, company_id)
+        _clean(body.billing_address_ar), body.is_strategic, client_id, company_id)
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Client not found")
     return await fetch_one(conn, "SELECT * FROM clients WHERE client_id=$1", client_id)

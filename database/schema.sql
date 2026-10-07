@@ -1895,6 +1895,24 @@ CREATE TABLE IF NOT EXISTS rfp_ict (
 );
 CREATE INDEX IF NOT EXISTS idx_rfp_ict_company_id ON rfp_ict(company_id);
 
+-- File 2 (bid log) fields for Module 2
+ALTER TABLE rfp_ict
+    ADD COLUMN IF NOT EXISTS rfp_ref          VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS channel          VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS project_type     VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS description      TEXT,
+    ADD COLUMN IF NOT EXISTS am_id            INT REFERENCES company_account_managers(am_id),
+    ADD COLUMN IF NOT EXISTS presales_emp_id  INT REFERENCES employees(emp_id),
+    ADD COLUMN IF NOT EXISTS bm_id            INT REFERENCES company_bid_managers(bm_id),
+    ADD COLUMN IF NOT EXISTS phase            VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS status           VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS reason           VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS project_size     VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS tcv              NUMERIC(18,4),
+    ADD COLUMN IF NOT EXISTS winner_name      VARCHAR(200),
+    ADD COLUMN IF NOT EXISTS winner_tcv       NUMERIC(18,4);
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_strategic BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Scope of work: the selected items from the ICT scope list (service_categories,
 -- up to five levels). Level 1 is single-choice; deeper levels allow several.
 CREATE TABLE IF NOT EXISTS rfp_ict_scope (
