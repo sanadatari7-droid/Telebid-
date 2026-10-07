@@ -10,22 +10,26 @@ import {
   ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck, Send
 } from "lucide-react"
 
-// 9 sections exactly as in Image 2
-const SECTIONS = [
-  { id:"1", num:"1", label:"Company Name",                       icon:Building2 },
-  { id:"2", num:"2", label:"Activation Code",                    icon:Key },
-  { id:"3", num:"3", label:"Reference Model",                    icon:Hash },
-  { id:"4", num:"4", label:"Account Managers",                   icon:Users },
-  { id:"5", num:"5", label:"Bid Specialists / Managers",         icon:Briefcase },
-  { id:"8", num:"8", label:"Bid Evaluations Questions & Value",  icon:ClipboardList },
-  { id:"9", num:"9", label:"EXPRO Feasibility Study",            icon:Microscope },
-  { id:"B", num:"B", label:"Evaluators (Module 1 / Sub-B)",      icon:UserCheck },
-  { id:"C", num:"C", label:"Pricing Approval (Module 1 / Sub-C)", icon:TrendingUp },
-  { id:"D", num:"D", label:"Bid Bond Approval (Module 1 / Sub-D)", icon:Shield },
+// Module 1 (Company) sub-modules first, then the remaining settings.
+const SECTION_GROUPS = [
+  { title: "Module 1 · Company", sections: [
+    { id:"1", num:"A", label:"Company Profile",            icon:Building2 },
+    { id:"B", num:"B", label:"Evaluators",                 icon:UserCheck },
+    { id:"C", num:"C", label:"Pricing Approval Cycle",     icon:TrendingUp },
+    { id:"D", num:"D", label:"Bid Bond Approval Cycle",    icon:Shield },
+  ]},
+  { title: "Other settings", sections: [
+    { id:"2", num:"1", label:"Activation Code",                    icon:Key },
+    { id:"3", num:"2", label:"Reference Model",                    icon:Hash },
+    { id:"4", num:"3", label:"Account Managers",                   icon:Users },
+    { id:"5", num:"4", label:"Bid Specialists / Managers",         icon:Briefcase },
+    { id:"8", num:"5", label:"Bid Evaluations Questions & Value",  icon:ClipboardList },
+    { id:"9", num:"6", label:"EXPRO Feasibility Study",            icon:Microscope },
+  ]},
 ]
 
 // ── Section 1 & 2: Company Info ───────────────────────────────────────────────
-function CompanyInfoSection() {
+function CompanyInfoSection({ part }) {
   const qc = useQueryClient()
   const { data: company } = useQuery({ queryKey:["company-cfg"], queryFn:()=>companyConfigApi.get().then(r=>r.data) })
   const { data: currencies = [] } = useQuery({ queryKey:["currencies"], queryFn:()=>companyConfigApi.getCurrencies().then(r=>r.data) })
@@ -35,11 +39,11 @@ function CompanyInfoSection() {
   const toggleService = key => setForm(p=>({...p,[key]: !p[key]}))
   const saveMut = useMutation({
     mutationFn: () => {
-      if (!form.services_ict && !form.services_telecom) {
+      if (part === "profile" && !form.services_ict && !form.services_telecom) {
         toast.error("Select at least one service offered (ICT, Telecom, or both)")
         return Promise.reject(new Error("validation"))
       }
-      return companyConfigApi.update(form)
+      return companyConfigApi.update(part === "activation" ? { activation_code: form.activation_code || "" } : form)
     },
     onSuccess: () => { toast.success("Company updated"); qc.invalidateQueries({queryKey:["company-cfg"]}) },
     onError: err => { if (err.message !== "validation") toast.error(err?.response?.data?.detail || "Failed to save") }
@@ -47,9 +51,9 @@ function CompanyInfoSection() {
 
   return (
     <div className="space-y-6">
-      {/* Section 1 — Company Name */}
+      {part === "profile" && (
       <div className="card space-y-4">
-        <div className="section-title flex items-center gap-2"><Building2 size={13}/> 1 — Company Name</div>
+        <div className="section-title flex items-center gap-2"><Building2 size={13}/> A — Company Profile</div>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Company Name (English)</label>
@@ -127,10 +131,11 @@ function CompanyInfoSection() {
           <p className="form-hint">Check both to offer ICT and Telecom.</p>
         </div>
       </div>
+      )}
 
-      {/* Section 2 — Activation Code */}
+      {part === "activation" && (
       <div className="card space-y-4">
-        <div className="section-title flex items-center gap-2"><Key size={13}/> 2 — Activation Code</div>
+        <div className="section-title flex items-center gap-2"><Key size={13}/> 1 — Activation Code</div>
         <div className="alert-warning text-xs">
           The activation code is used to license and authenticate the application. Keep it secure.
         </div>
@@ -140,9 +145,10 @@ function CompanyInfoSection() {
             onChange={fc} placeholder="Enter activation code"/>
         </div>
       </div>
+      )}
 
       <button className="btn-primary" disabled={saveMut.isPending} onClick={()=>saveMut.mutate()}>
-        <Check size={13}/> {saveMut.isPending?"Saving…":"Save Company Settings"}
+        <Check size={13}/> {saveMut.isPending?"Saving…":(part === "activation" ? "Save Activation Code" : "Save Company Profile")}
       </button>
     </div>
   )
@@ -185,7 +191,7 @@ function RefModelSection() {
   return (
     <div className="card space-y-5">
       <div>
-        <div className="section-title flex items-center gap-2"><Hash size={13}/> 3 — Reference Model</div>
+        <div className="section-title flex items-center gap-2"><Hash size={13}/> 2 — Reference Model</div>
         <div className="alert-info text-xs mb-4">
           Fields are optional checkboxes — enable only the components you want in the customer reference.
         </div>
@@ -290,7 +296,7 @@ function PeopleSection({ type }) {
     onSuccess: () => { toast.success("Removed"); qc.invalidateQueries({queryKey:[isAM?"company-ams":"company-bms"]}) }
   })
 
-  const title = isAM ? "4 — Account Managers" : "5 — Bid Specialists / Managers"
+  const title = isAM ? "3 — Account Managers" : "4 — Bid Specialists / Managers"
   const Icon = isAM ? Users : Briefcase
 
   return (
@@ -652,7 +658,7 @@ function BidEvalSection() {
   })
   return (
     <div className="card space-y-4">
-      <div className="section-title flex items-center gap-2"><ClipboardList size={13}/> 8 — Bid Evaluations Questions & Associated Value</div>
+      <div className="section-title flex items-center gap-2"><ClipboardList size={13}/> 5 — Bid Evaluations Questions & Associated Value</div>
       <div className="alert-info text-sm">
         Evaluation templates define the weighted criteria used to score vendor bids.
       </div>
@@ -680,7 +686,7 @@ function BidEvalSection() {
 function ExproFeasibilitySection() {
   return (
     <div className="card space-y-4">
-      <div className="section-title flex items-center gap-2"><Microscope size={13}/> 9 — EXPRO Feasibility Study</div>
+      <div className="section-title flex items-center gap-2"><Microscope size={13}/> 6 — EXPRO Feasibility Study</div>
       <div className="alert-info text-sm">
         The EXPRO Feasibility Study captures Sales and Pre-Sales responsibility for each opportunity.
       </div>
@@ -705,8 +711,6 @@ function ExproFeasibilitySection() {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function CompanySettingsPage() {
   const [active, setActive] = useState("1")
-  const section = SECTIONS.find(s=>s.id===active)
-  const Icon = section?.icon || Building2
 
   return (
     <div className="p-6 max-w-screen-xl mx-auto space-y-5">
@@ -718,24 +722,29 @@ export default function CompanySettingsPage() {
       </div>
 
       <div className="flex gap-6">
-        {/* Left nav — 9 sections */}
-        <div className="w-72 flex-shrink-0 space-y-1">
-          {SECTIONS.map(s => (
-            <button key={s.id} onClick={()=>setActive(s.id)}
-              className={clsx("w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-left transition-all",
-                active===s.id ? "bg-blue-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-100 hover:text-gray-900")}>
-              <span className={clsx("w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0",
-                active===s.id ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>
-                {s.num}
-              </span>
-              <span className="truncate">{s.label}</span>
-            </button>
+        <div className="w-72 flex-shrink-0 space-y-5">
+          {SECTION_GROUPS.map(g => (
+            <div key={g.title} className="space-y-1">
+              <div className="px-4 pb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">{g.title}</div>
+              {g.sections.map(s => (
+                <button key={s.id} onClick={()=>setActive(s.id)}
+                  className={clsx("w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-left transition-all",
+                    active===s.id ? "bg-blue-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-100 hover:text-gray-900")}>
+                  <span className={clsx("w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0",
+                    active===s.id ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>
+                    {s.num}
+                  </span>
+                  <span className="truncate">{s.label}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
 
         {/* Right content */}
         <div className="flex-1 min-w-0">
-          {active==="1" || active==="2" ? <CompanyInfoSection/> : null}
+          {active==="1" ? <CompanyInfoSection part="profile"/> : null}
+          {active==="2" ? <CompanyInfoSection part="activation"/> : null}
           {active==="3" ? <RefModelSection/> : null}
           {active==="4" ? <PeopleSection type="am"/> : null}
           {active==="5" ? <PeopleSection type="bm"/> : null}

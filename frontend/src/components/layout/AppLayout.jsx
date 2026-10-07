@@ -19,6 +19,8 @@ const NAV_SECTIONS = [
     section: null,
     items: [
       { label: "Dashboard", tKey: "nav.dashboard", path: "/dashboard",  icon: LayoutDashboard, badge: null },
+      // Module 1 (Company) — set up first, so it sits at the top.
+      { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2 },
     ]
   },
   {
@@ -71,7 +73,6 @@ const NAV_SECTIONS = [
   {
     section: "Admin", sectionTKey: "nav.sectionAdmin",
     items: [
-      { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2 },
       { label: "System Settings",  tKey: "nav.systemSettings",  path: "/system-settings",  icon: Settings },
       { label: "Users",            tKey: "nav.users",           path: "/users",            icon: Users },
       { label: "Employees",        tKey: "nav.employees",       path: "/employees",        icon: Users },
