@@ -378,31 +378,35 @@ export const serviceCatsApi = {
   delete: id => api.delete(`/service-categories/${id}`),
 }
 
-// ── MODULE 2: RFP ICT ─────────────────────────────────────────────────────────
+// ── MODULES 2–4: RFP ICT, RFP Telecom, EXPRO ──────────────────────────────────
 export const clientsApi = {
   list:      () => api.get("/clients"),
   create:    d => api.post("/clients", d),
   update:    (id, d) => api.put(`/clients/${id}`, d),
   translate: (text, kind) => api.post("/translate/arabic", { text, kind }),
 }
-export const rfpIctApi = {
-  list:        () => api.get("/rfp-ict"),
-  get:         id => api.get(`/rfp-ict/${id}`),
-  create:      d => api.post("/rfp-ict", d),
-  update:      (id, d) => api.put(`/rfp-ict/${id}`, d),
-  delete:      id => api.delete(`/rfp-ict/${id}`),
-  lists:             () => api.get("/rfp-ict/lists"),
-  teamOptions:       () => api.get("/rfp-ict/team-options"),
-  scopeOptions:      () => api.get("/rfp-ict/scope-options"),
-  addScopeOption:    d => api.post("/rfp-ict/scope-options", d),
-  removeScopeOption: id => api.delete(`/rfp-ict/scope-options/${id}`),
-  evalConfig:        () => api.get("/rfp-ict/eval-config"),
-  saveEvalConfig:    d => api.put("/rfp-ict/eval-config", d),
-  evaluation:        id => api.get(`/rfp-ict/${id}/evaluation`),
-  saveEvaluation:    (id, d) => api.put(`/rfp-ict/${id}/evaluation`, d),
-  bidBond:           id => api.get(`/rfp-ict/${id}/bid-bond`),
-  saveBidBond:       (id, d) => api.put(`/rfp-ict/${id}/bid-bond`, d),
-  deleteBidBond:     id => api.delete(`/rfp-ict/${id}/bid-bond`),
+// module: "ict" | "telecom" | "expro" — the three modules share one API.
+export const rfpApi = module => {
+  const base = `/rfps/${module}`
+  return {
+    list:              () => api.get(base),
+    get:               id => api.get(`${base}/${id}`),
+    create:            d => api.post(base, d),
+    update:            (id, d) => api.put(`${base}/${id}`, d),
+    delete:            id => api.delete(`${base}/${id}`),
+    lists:             () => api.get(`${base}/lists`),
+    teamOptions:       () => api.get(`${base}/team-options`),
+    scopeOptions:      () => api.get(`${base}/scope-options`),
+    addScopeOption:    d => api.post(`${base}/scope-options`, d),
+    removeScopeOption: id => api.delete(`${base}/scope-options/${id}`),
+    evalConfig:        () => api.get(`${base}/eval-config`),
+    saveEvalConfig:    d => api.put(`${base}/eval-config`, d),
+    evaluation:        id => api.get(`${base}/${id}/evaluation`),
+    saveEvaluation:    (id, d) => api.put(`${base}/${id}/evaluation`, d),
+    bidBond:           id => api.get(`${base}/${id}/bid-bond`),
+    saveBidBond:       (id, d) => api.put(`${base}/${id}/bid-bond`, d),
+    deleteBidBond:     id => api.delete(`${base}/${id}/bid-bond`),
+  }
 }
 
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────

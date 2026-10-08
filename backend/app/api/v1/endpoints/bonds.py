@@ -94,7 +94,7 @@ async def list_bonds(
                (b.expiry_date - CURRENT_DATE)::INT AS days_to_expiry
         FROM opportunity_bonds b
         LEFT JOIN opportunities_v2 o ON b.opp_id=o.opp_id
-        LEFT JOIN rfp_ict ri ON b.rfp_ict_id=ri.rfp_id
+        LEFT JOIN rfps ri ON b.rfp_id=ri.rfp_id
         LEFT JOIN clients cl ON ri.client_id=cl.client_id
         LEFT JOIN currencies c ON b.currency_id=c.currency_id
         LEFT JOIN users u ON b.created_by=u.user_id
@@ -188,7 +188,7 @@ async def _send_to_office(conn, bond_id: int, company_id: int) -> dict:
                    COALESCE(o.customer_name, cl.name_en) AS customer_name, c.currency_code
             FROM opportunity_bonds b
             LEFT JOIN opportunities_v2 o ON b.opp_id=o.opp_id
-            LEFT JOIN rfp_ict ri ON b.rfp_ict_id=ri.rfp_id
+            LEFT JOIN rfps ri ON b.rfp_id=ri.rfp_id
             LEFT JOIN clients cl ON ri.client_id=cl.client_id
             LEFT JOIN currencies c ON b.currency_id=c.currency_id
             WHERE b.bond_id=$1 AND b.company_id=$2""", bond_id, company_id)

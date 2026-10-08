@@ -4,10 +4,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import { Check, Shield, Trash2, Lock, ArrowRight } from "lucide-react"
-import { rfpIctApi } from "../../services/api"
+import { rfpApi } from "../../services/api"
 import { apiErrorMessage } from "../../utils/apiError"
 import { fmt } from "../../utils/fmt"
-import { formatMoney } from "../../utils/rfpIct"
+import { RFP_MODULES, formatMoney } from "../../utils/rfp"
 import ApprovalCycle, { useBondApprovalConfig } from "../bonds/ApprovalCycle"
 
 function Row({ num, label, source, children }) {
@@ -30,10 +30,14 @@ const addDays = (iso, days) => {
   return d
 }
 
-export default function RfpBidBond({ rfpId, onGoToDetails }) {
+export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
+  const mod = RFP_MODULES[module]
+  const api = rfpApi(module)
+  const key = ["rfp-bid-bond", module, rfpId]
+  const details = mod.expro ? "the request details" : "RFP details"
   const qc = useQueryClient()
   const { titles, officeName } = useBondApprovalConfig()
-  const { data, isLoading } = useQuery({ queryKey: ["rfp-bid-bond", rfpId], queryFn: () => rfpIctApi.bidBond(rfpId).then(r => r.data) })
+  const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => api.bidBond(rfpId).then(r => r.data) })
   const [form, setForm] = useState(null)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
@@ -45,28 +49,33 @@ export default function RfpBidBond({ rfpId, onGoToDetails }) {
       : data.defaults && { ...data.defaults, lg_base_value: data.defaults.lg_base_value ?? "" })
   }, [data])
 
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["rfp-bid-bond", rfpId] }); qc.invalidateQueries({ queryKey: ["bonds"] }) }
+  const refresh = () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["bonds"] }) }
   const saveMut = useMutation({
-    mutationFn: () => rfpIctApi.saveBidBond(rfpId, { ...form, validity_days: Number(form.validity_days), lg_base_value: Number(form.lg_base_value) }),
-    onSuccess: r => { toast.success(data.bond ? "Bid bond request updated" : `Bid bond request created — waiting for ${titles[0]}`); qc.setQueryData(["rfp-bid-bond", rfpId], r.data); qc.invalidateQueries({ queryKey: ["bonds"] }) },
+    mutationFn: () => api.saveBidBond(rfpId, { ...form, validity_days: Number(form.validity_days), lg_base_value: Number(form.lg_base_value) }),
+    onSuccess: r => { toast.success(data.bond ? "Bid bond request updated" : `Bid bond request created — waiting for ${titles[0]}`); qc.setQueryData(key, r.data); qc.invalidateQueries({ queryKey: ["bonds"] }) },
     onError: err => toast.error(apiErrorMessage(err, "Couldn't save the bid bond request")),
   })
   const deleteMut = useMutation({
-    mutationFn: () => rfpIctApi.deleteBidBond(rfpId),
+    mutationFn: () => api.deleteBidBond(rfpId),
     onSuccess: () => { toast.success("Bid bond request deleted"); refresh() },
     onError: err => toast.error(apiErrorMessage(err, "Couldn't delete the request")),
   })
 
   if (isLoading || !data) return <div className="card text-sm text-gray-400">Loading bid bond…</div>
   const { rfp, currency, bond } = data
+  // Field 2 is the RFP title; EXPRO requests have none, so their SOW is offered instead.
+  const titleLabel = mod.expro ? "Request title" : "RFP title"
+  const titleSource = rfp.rfp_title ? "From RFP details — edit if the bond needs different wording"
+    : mod.expro && rfp.sow ? "From the request's SOW — edit if the bond needs different wording"
+    : `Not set in ${details} — type it here`
 
   if (!rfp.bid_bond_required || rfp.bid_bond_pct === null) {
     return (
       <div className="card text-center py-12 space-y-3">
         <Shield size={32} className="mx-auto text-gray-300"/>
-        <p className="text-gray-700 font-medium">This RFP doesn't need a bid bond</p>
-        <p className="text-sm text-gray-500">To request one, set "Bid bond required?" to Yes and choose the percentage in RFP details.</p>
-        <button className="btn-secondary inline-flex" onClick={onGoToDetails}>Go to RFP details</button>
+        <p className="text-gray-700 font-medium">This {mod.noun} doesn't need a bid bond</p>
+        <p className="text-sm text-gray-500">To request one, set "Bid bond required?" to Yes and choose the percentage in {details}.</p>
+        <button className="btn-secondary inline-flex" onClick={onGoToDetails}>Go to {details}</button>
       </div>
     )
   }
@@ -87,7 +96,7 @@ export default function RfpBidBond({ rfpId, onGoToDetails }) {
         <div className="flex items-start justify-between gap-4 pb-2">
           <div>
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2"><Shield size={16} className="text-amber-500"/> Bid bond request</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Most of it is filled in from the RFP. Check it, enter the bid value, and save.</p>
+            <p className="text-sm text-gray-500 mt-0.5">Most of it is filled in from the {mod.noun}. Check it, enter the bid value, and save.</p>
           </div>
           {locked && <span className="badge bg-gray-100 text-gray-600 flex items-center gap-1 whitespace-nowrap"><Lock size={11}/> Locked — in approval</span>}
         </div>
@@ -100,11 +109,12 @@ export default function RfpBidBond({ rfpId, onGoToDetails }) {
               <div className="text-xs text-gray-500 whitespace-pre-line">{rfp.billing_address_ar || ""}</div></div>
             <p className="text-xs text-gray-400 mt-1">The highlighted version goes on the bond, to match its language.</p>
           </Row>
-          <Row num="2" label="RFP title" source={rfp.rfp_title ? "From RFP details — edit if the bond needs different wording" : "Not set in RFP details — type it here"}>
-            <input className="input" value={form.bid_subject} onChange={e => set("bid_subject", e.target.value)} placeholder="e.g. Hospital campus network refresh"/>
-            {!form.bid_subject.trim() && <p className="text-xs text-red-500 mt-1">The RFP title is required.</p>}
+          <Row num="2" label={titleLabel} source={titleSource}>
+            <input className="input" value={form.bid_subject} onChange={e => set("bid_subject", e.target.value)}
+              placeholder={mod.expro ? "e.g. L3 (IPVPN) Core Fiber" : "e.g. Hospital campus network refresh"}/>
+            {!form.bid_subject.trim() && <p className="text-xs text-red-500 mt-1">The {titleLabel.toLowerCase()} is required.</p>}
           </Row>
-          <Row num="3" label="Submission date" source="From RFP details">
+          <Row num="3" label="Submission date" source={`From ${details}`}>
             <div className="text-sm font-medium text-gray-900 py-2">{fmt(rfp.submission_date)}</div>
           </Row>
           <Row num="4" label="Bond duration" source="Counted from the submission date">
@@ -117,20 +127,20 @@ export default function RfpBidBond({ rfpId, onGoToDetails }) {
               <span className="text-sm text-gray-700">Valid until <strong>{fmt(expiry)}</strong></span>
             </div>
           </Row>
-          <Row num="5" label="Bid value" source={rfp.tcv !== null ? "Prefilled from the RFP's TCV" : "The value of our bid"}>
+          <Row num="5" label="Bid value" source={rfp.tcv !== null ? `Prefilled from the ${mod.noun}'s TCV` : "The value of our bid"}>
             <div className="relative max-w-xs">
               <input type="number" min="0" step={1 / 10 ** d} className="input pr-14 tabular-nums" value={form.lg_base_value}
                 onChange={e => set("lg_base_value", e.target.value)} placeholder="0"/>
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{currency?.code}</span>
             </div>
           </Row>
-          <Row num="6" label="Bid bond value" source={`${pct}% of the bid value, from RFP details`}>
+          <Row num="6" label="Bid bond value" source={`${pct}% of the bid value, from ${details}`}>
             <div className="py-1">
               <div className="text-2xl font-bold text-gray-900 tabular-nums">{formatMoney(amount, currency)}</div>
               <div className="text-xs text-gray-500">{pct}% × {formatMoney(value, currency)}</div>
             </div>
           </Row>
-          <Row num="7" label="Reference" source={rfp.company_initials ? `Company initials (${rfp.company_initials}) + RFP reference` : "Add company initials in Company Settings → Company Profile"}>
+          <Row num="7" label="Reference" source={rfp.company_initials ? `Company initials (${rfp.company_initials}) + ${mod.expro ? "EXPRO number" : "RFP reference"}` : "Add company initials in Company Settings → Company Profile"}>
             <input className="input font-mono" value={form.bid_ref} onChange={e => set("bid_ref", e.target.value)}/>
           </Row>
           <Row num="8" label="Language of bond">
@@ -164,7 +174,7 @@ export default function RfpBidBond({ rfpId, onGoToDetails }) {
       <aside className="lg:sticky lg:top-20 space-y-4">
         {bond ? (
           <>
-            <ApprovalCycle bond={bond} onChange={() => qc.invalidateQueries({ queryKey: ["rfp-bid-bond", rfpId] })}/>
+            <ApprovalCycle bond={bond} onChange={() => qc.invalidateQueries({ queryKey: key })}/>
             <Link to="/bonds" className="text-xs text-blue-600 hover:underline block text-center">Also listed on the Bonds page</Link>
           </>
         ) : (

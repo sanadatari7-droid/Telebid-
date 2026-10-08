@@ -1,8 +1,8 @@
-"""Module 2 / Sub-module 2 — Go / No-Go evaluation of an ICT RFP.
+"""Sub-module 2 of Modules 2–4 — Go / No-Go evaluation of an RFP.
 
-The bid department sets the questions once: each has a weight (all weights add up
-to 100%) and answer options, each worth a % of that weight. For an RFP, the score is
-the sum of weight × answer value. It's a Go only when the score reaches the pass mark
+The bid department sets the questions once per module: each has a weight (all weights
+add up to 100%) and answer options, each worth a % of that weight. For an RFP, the score
+is the sum of weight × answer value. It's a Go only when the score reaches the pass mark
 and the business case EBITDA meets the minimum set in Module 1 / Sub-module C.
 """
 from typing import List, Optional
@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field
 
 from app.db.postgres import get_db, fetch_all, fetch_one, fetch_val, execute, require_company
 from app.middleware.auth import get_current_user, require_roles
+from app.api.v1.endpoints.rfps import MODULES, Module, require_rfp
 
-router = APIRouter(prefix="/rfp-ict", tags=["RFP ICT evaluation"])
+router = APIRouter(prefix="/rfps", tags=["RFP evaluation"])
 
 DEFAULT_PASS_MARK = 60.0
 
@@ -50,17 +51,18 @@ class EvaluationIn(BaseModel):
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-async def _config(conn, company_id: int) -> dict:
-    pass_mark = await fetch_val(conn, "SELECT pass_mark FROM rfp_eval_settings WHERE company_id=$1", company_id)
+async def _config(conn, company_id: int, code: str) -> dict:
+    pass_mark = await fetch_val(conn, "SELECT pass_mark FROM rfp_eval_settings WHERE company_id=$1 AND module=$2",
+                                company_id, code)
     questions = await fetch_all(conn, """
         SELECT question_id, question, weight, evaluator_title, sort_order
-        FROM rfp_eval_questions WHERE company_id=$1 AND is_active=TRUE
-        ORDER BY sort_order, question_id""", company_id)
+        FROM rfp_eval_questions WHERE company_id=$1 AND module=$2 AND is_active=TRUE
+        ORDER BY sort_order, question_id""", company_id, code)
     options = await fetch_all(conn, """
         SELECT o.option_id, o.question_id, o.label, o.value, o.sort_order
         FROM rfp_eval_options o JOIN rfp_eval_questions q ON q.question_id=o.question_id
-        WHERE q.company_id=$1 AND q.is_active=TRUE AND o.is_active=TRUE
-        ORDER BY o.sort_order, o.option_id""", company_id)
+        WHERE q.company_id=$1 AND q.module=$2 AND q.is_active=TRUE AND o.is_active=TRUE
+        ORDER BY o.sort_order, o.option_id""", company_id, code)
     by_q = {}
     for o in options:
         by_q.setdefault(o["question_id"], []).append(o)
@@ -114,24 +116,27 @@ def _result(config: dict, answers: dict, ebitda_pct, ebitda_min) -> dict:
     return {**base, "recommendation": "GO", "reasons": ok}
 
 
-# ── Questions setup (set once) ────────────────────────────────────────────────
+# ── Questions setup (set once per module) ─────────────────────────────────────
 
-@router.get("/eval-config")
-async def get_eval_config(conn=Depends(get_db), current_user=Depends(get_current_user)):
+@router.get("/{module}/eval-config")
+async def get_eval_config(module: Module, conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
-    return {**await _config(conn, company_id), "titles": await _evaluator_titles(conn, company_id)}
+    return {**await _config(conn, company_id, MODULES[module].code), "titles": await _evaluator_titles(conn, company_id)}
 
 
-@router.put("/eval-config")
-async def save_eval_config(body: EvalConfigIn, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+@router.put("/{module}/eval-config")
+async def save_eval_config(module: Module, body: EvalConfigIn, conn=Depends(get_db),
+                           current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
+    code = MODULES[module].code
     if body.questions:
         total = round(sum(q.weight for q in body.questions), 2)
         if abs(total - 100) > 0.01:
             raise HTTPException(status_code=400, detail=f"The question weights must add up to 100% (they add up to {total:g}%)")
     titles = await _evaluator_titles(conn, company_id)
     existing_q = {r["question_id"] for r in await fetch_all(conn,
-        "SELECT question_id FROM rfp_eval_questions WHERE company_id=$1 AND is_active=TRUE", company_id)}
+        "SELECT question_id FROM rfp_eval_questions WHERE company_id=$1 AND module=$2 AND is_active=TRUE",
+        company_id, code)}
     for i, q in enumerate(body.questions, 1):
         if not q.question.strip():
             raise HTTPException(status_code=400, detail=f"Question {i} is empty")
@@ -145,22 +150,22 @@ async def save_eval_config(body: EvalConfigIn, conn=Depends(get_db), current_use
 
     async with conn.transaction():
         await execute(conn, """
-            INSERT INTO rfp_eval_settings (company_id, pass_mark, updated_at) VALUES ($1,$2,NOW())
-            ON CONFLICT (company_id) DO UPDATE SET pass_mark=EXCLUDED.pass_mark, updated_at=NOW()""",
-            company_id, body.pass_mark)
+            INSERT INTO rfp_eval_settings (company_id, module, pass_mark, updated_at) VALUES ($1,$2,$3,NOW())
+            ON CONFLICT (company_id, module) DO UPDATE SET pass_mark=EXCLUDED.pass_mark, updated_at=NOW()""",
+            company_id, code, body.pass_mark)
         kept = set()
         for i, q in enumerate(body.questions, 1):
             if q.question_id:
                 qid = q.question_id
                 await execute(conn, """
                     UPDATE rfp_eval_questions SET question=$1, weight=$2, evaluator_title=$3, sort_order=$4
-                    WHERE question_id=$5 AND company_id=$6""",
-                    q.question.strip(), q.weight, q.evaluator_title or None, i, qid, company_id)
+                    WHERE question_id=$5 AND company_id=$6 AND module=$7""",
+                    q.question.strip(), q.weight, q.evaluator_title or None, i, qid, company_id, code)
             else:
                 qid = await fetch_val(conn, """
-                    INSERT INTO rfp_eval_questions (company_id, question, weight, evaluator_title, sort_order)
-                    VALUES ($1,$2,$3,$4,$5) RETURNING question_id""",
-                    company_id, q.question.strip(), q.weight, q.evaluator_title or None, i)
+                    INSERT INTO rfp_eval_questions (company_id, module, question, weight, evaluator_title, sort_order)
+                    VALUES ($1,$2,$3,$4,$5,$6) RETURNING question_id""",
+                    company_id, code, q.question.strip(), q.weight, q.evaluator_title or None, i)
             kept.add(qid)
             existing_o = {r["option_id"] for r in await fetch_all(conn,
                 "SELECT option_id FROM rfp_eval_options WHERE question_id=$1 AND is_active=TRUE", qid)}
@@ -180,20 +185,19 @@ async def save_eval_config(body: EvalConfigIn, conn=Depends(get_db), current_use
         removed = list(existing_q - kept)
         if removed:
             await execute(conn, "UPDATE rfp_eval_questions SET is_active=FALSE WHERE question_id = ANY($1::int[])", removed)
-    return {**await _config(conn, company_id), "titles": titles}
+    return {**await _config(conn, company_id, code), "titles": titles}
 
 
 # ── Per-RFP evaluation ────────────────────────────────────────────────────────
 
-async def _evaluation(conn, rfp_id: int, company_id: int) -> dict:
-    if not await fetch_val(conn, "SELECT 1 FROM rfp_ict WHERE rfp_id=$1 AND company_id=$2", rfp_id, company_id):
-        raise HTTPException(status_code=404, detail="RFP not found")
-    config = await _config(conn, company_id)
+async def _evaluation(conn, module: Module, rfp_id: int, company_id: int) -> dict:
+    spec = await require_rfp(conn, module, rfp_id, company_id)
+    config = await _config(conn, company_id, spec.code)
     answers = await fetch_all(conn, """
         SELECT a.question_id, a.option_id, a.comment, a.answered_at, u.full_name AS answered_by_name
-        FROM rfp_ict_eval_answers a LEFT JOIN users u ON u.user_id=a.answered_by
+        FROM rfp_eval_answers a LEFT JOIN users u ON u.user_id=a.answered_by
         WHERE a.rfp_id=$1""", rfp_id)
-    ev = await fetch_one(conn, "SELECT ebitda_pct, updated_at FROM rfp_ict_evaluations WHERE rfp_id=$1", rfp_id)
+    ev = await fetch_one(conn, "SELECT ebitda_pct, updated_at FROM rfp_evaluations WHERE rfp_id=$1", rfp_id)
     ebitda_pct = float(ev["ebitda_pct"]) if ev and ev["ebitda_pct"] is not None else None
     ebitda_min = await fetch_val(conn, "SELECT ebitda_min_pct FROM company_pricing_approval WHERE company_id=$1", company_id)
     ebitda_min = float(ebitda_min) if ebitda_min is not None else None
@@ -205,17 +209,17 @@ async def _evaluation(conn, rfp_id: int, company_id: int) -> dict:
     }
 
 
-@router.get("/{rfp_id}/evaluation")
-async def get_evaluation(rfp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    return await _evaluation(conn, rfp_id, require_company(current_user))
+@router.get("/{module}/{rfp_id:int}/evaluation")
+async def get_evaluation(module: Module, rfp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    return await _evaluation(conn, module, rfp_id, require_company(current_user))
 
 
-@router.put("/{rfp_id}/evaluation")
-async def save_evaluation(rfp_id: int, body: EvaluationIn, conn=Depends(get_db), current_user=Depends(get_current_user)):
+@router.put("/{module}/{rfp_id:int}/evaluation")
+async def save_evaluation(module: Module, rfp_id: int, body: EvaluationIn, conn=Depends(get_db),
+                          current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
-    if not await fetch_val(conn, "SELECT 1 FROM rfp_ict WHERE rfp_id=$1 AND company_id=$2", rfp_id, company_id):
-        raise HTTPException(status_code=404, detail="RFP not found")
-    config = await _config(conn, company_id)
+    spec = await require_rfp(conn, module, rfp_id, company_id)
+    config = await _config(conn, company_id, spec.code)
     valid = {q["question_id"]: {o["option_id"] for o in q["options"]} for q in config["questions"]}
     seen = set()
     for a in body.answers:
@@ -229,26 +233,26 @@ async def save_evaluation(rfp_id: int, body: EvaluationIn, conn=Depends(get_db),
     result = _result(config, {a.question_id: a.option_id for a in body.answers}, body.ebitda_pct,
                      float(ebitda_min) if ebitda_min is not None else None)
     async with conn.transaction():
-        await execute(conn, "DELETE FROM rfp_ict_eval_answers WHERE rfp_id=$1 AND NOT (question_id = ANY($2::int[]))",
+        await execute(conn, "DELETE FROM rfp_eval_answers WHERE rfp_id=$1 AND NOT (question_id = ANY($2::int[]))",
                       rfp_id, list(seen))
         for a in body.answers:
             # Who answered (and when) only changes when the answer itself changes.
             await execute(conn, """
-                INSERT INTO rfp_ict_eval_answers (rfp_id, question_id, option_id, comment, answered_by, answered_at)
+                INSERT INTO rfp_eval_answers (rfp_id, question_id, option_id, comment, answered_by, answered_at)
                 VALUES ($1,$2,$3,$4,$5,NOW())
                 ON CONFLICT (rfp_id, question_id) DO UPDATE SET
                     option_id=EXCLUDED.option_id, comment=EXCLUDED.comment,
-                    answered_by = CASE WHEN rfp_ict_eval_answers.option_id IS DISTINCT FROM EXCLUDED.option_id
-                                         OR rfp_ict_eval_answers.comment IS DISTINCT FROM EXCLUDED.comment
-                                       THEN EXCLUDED.answered_by ELSE rfp_ict_eval_answers.answered_by END,
-                    answered_at = CASE WHEN rfp_ict_eval_answers.option_id IS DISTINCT FROM EXCLUDED.option_id
-                                         OR rfp_ict_eval_answers.comment IS DISTINCT FROM EXCLUDED.comment
-                                       THEN NOW() ELSE rfp_ict_eval_answers.answered_at END""",
+                    answered_by = CASE WHEN rfp_eval_answers.option_id IS DISTINCT FROM EXCLUDED.option_id
+                                         OR rfp_eval_answers.comment IS DISTINCT FROM EXCLUDED.comment
+                                       THEN EXCLUDED.answered_by ELSE rfp_eval_answers.answered_by END,
+                    answered_at = CASE WHEN rfp_eval_answers.option_id IS DISTINCT FROM EXCLUDED.option_id
+                                         OR rfp_eval_answers.comment IS DISTINCT FROM EXCLUDED.comment
+                                       THEN NOW() ELSE rfp_eval_answers.answered_at END""",
                 rfp_id, a.question_id, a.option_id, (a.comment or "").strip() or None, current_user.user_id)
         await execute(conn, """
-            INSERT INTO rfp_ict_evaluations (rfp_id, ebitda_pct, score, recommendation, updated_by, updated_at)
+            INSERT INTO rfp_evaluations (rfp_id, ebitda_pct, score, recommendation, updated_by, updated_at)
             VALUES ($1,$2,$3,$4,$5,NOW())
             ON CONFLICT (rfp_id) DO UPDATE SET ebitda_pct=EXCLUDED.ebitda_pct, score=EXCLUDED.score,
                 recommendation=EXCLUDED.recommendation, updated_by=EXCLUDED.updated_by, updated_at=NOW()""",
             rfp_id, body.ebitda_pct, result["score"], result["recommendation"], current_user.user_id)
-    return await _evaluation(conn, rfp_id, company_id)
+    return await _evaluation(conn, module, rfp_id, company_id)

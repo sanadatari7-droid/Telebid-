@@ -4,17 +4,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import { Plus, Trash2, Check, ArrowUp, ArrowDown, ClipboardCheck, X } from "lucide-react"
-import { rfpIctApi } from "../../services/api"
+import { rfpApi } from "../../services/api"
 import { apiErrorMessage } from "../../utils/apiError"
+import { RFP_MODULES } from "../../utils/rfp"
 
 const DEFAULT_OPTIONS = [{ label: "Yes", value: 100 }, { label: "Partly", value: 50 }, { label: "No", value: 0 }]
 let tmpId = 0
 const newQuestion = () => ({ key: `n${++tmpId}`, question: "", weight: "", evaluator_title: "", options: DEFAULT_OPTIONS.map(o => ({ ...o, key: `o${++tmpId}` })) })
 
-// Set once by the bid department: the questions every ICT RFP is evaluated against.
-export default function EvalQuestionsManager() {
+// Set once by the bid department, per module: the questions every RFP in the module is evaluated against.
+export default function EvalQuestionsManager({ module }) {
+  const mod = RFP_MODULES[module]
+  const api = rfpApi(module)
   const qc = useQueryClient()
-  const { data } = useQuery({ queryKey: ["rfp-eval-config"], queryFn: () => rfpIctApi.evalConfig().then(r => r.data) })
+  const { data } = useQuery({ queryKey: ["rfp-eval-config", module], queryFn: () => api.evalConfig().then(r => r.data) })
   const [passMark, setPassMark] = useState(60)
   const [questions, setQuestions] = useState([])
 
@@ -38,14 +41,14 @@ export default function EvalQuestionsManager() {
   const move = (i, d) => setQuestions(qs => { const n = [...qs]; [n[i], n[i + d]] = [n[i + d], n[i]]; return n })
 
   const saveMut = useMutation({
-    mutationFn: () => rfpIctApi.saveEvalConfig({
+    mutationFn: () => api.saveEvalConfig({
       pass_mark: Number(passMark),
       questions: questions.map(q => ({
         question_id: q.question_id, question: q.question, weight: Number(q.weight), evaluator_title: q.evaluator_title || null,
         options: q.options.map(o => ({ option_id: o.option_id, label: o.label, value: Number(o.value) })),
       })),
     }),
-    onSuccess: () => { toast.success("Evaluation questions saved"); qc.invalidateQueries({ queryKey: ["rfp-eval-config"] }); qc.invalidateQueries({ queryKey: ["rfp-evaluation"] }) },
+    onSuccess: () => { toast.success("Evaluation questions saved"); qc.invalidateQueries({ queryKey: ["rfp-eval-config", module] }); qc.invalidateQueries({ queryKey: ["rfp-evaluation", module] }) },
     onError: err => toast.error(apiErrorMessage(err, "Couldn't save the questions")),
   })
 
@@ -55,8 +58,9 @@ export default function EvalQuestionsManager() {
         <div>
           <div className="section-title flex items-center gap-2"><ClipboardCheck size={13}/> Evaluation questions</div>
           <p className="text-sm text-gray-500 max-w-3xl">
-            Set once by the bid department. Every ICT RFP is answered against these questions. Each question has a weight;
-            each answer is worth a share of that weight. The RFP's score is the total, out of 100%.
+            Set once by the bid department. Every {mod.expro ? "EXPRO request" : `${mod.title} RFP`} is answered against these
+            questions; the other modules have their own. Each question has a weight; each answer is worth a share of that
+            weight. The {mod.noun}'s score is the total, out of 100%.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-6">
@@ -67,7 +71,7 @@ export default function EvalQuestionsManager() {
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
             </div>
           </div>
-          <p className="text-sm text-gray-500 pb-2.5">An RFP needs at least this score, and the EBITDA minimum from{" "}
+          <p className="text-sm text-gray-500 pb-2.5">{mod.expro ? "A request" : "An RFP"} needs at least this score, and the EBITDA minimum from{" "}
             <Link to="/company-settings" className="text-blue-600 hover:underline">Pricing Approval</Link>, to be a <strong className="text-green-700">Go</strong>.</p>
         </div>
         {titles.length === 0 && (

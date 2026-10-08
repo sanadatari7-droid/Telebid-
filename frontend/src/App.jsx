@@ -33,12 +33,13 @@ const OpportunitiesV2Page= lazy(() => import("./pages/OpportunitiesV2Page"))
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"))
 const LostRecordsPage = lazy(() => import("./pages/LostRecordsPage"))
 const CompanySettingsPage = lazy(() => import("./pages/CompanySettingsPage"))
-const RfpIctPage          = lazy(() => import("./pages/RfpIctPage"))
-const RfpIctEditorPage    = lazy(() => import("./pages/RfpIctEditorPage"))
 const BondsPage           = lazy(() => import("./pages/BondsPage"))
 const WonRecordsPage      = lazy(() => import("./pages/WonRecordsPage"))
 const AiAlertsPage        = lazy(() => import("./pages/AiAlertsPage"))
 const ContentLibraryPage  = lazy(() => import("./pages/ContentLibraryPage"))
+// Modules 2–4 (RFP ICT, RFP Telecom, EXPRO) share these two pages.
+const RfpListPage         = lazy(() => import("./pages/RfpListPage"))
+const RfpEditorPage       = lazy(() => import("./pages/RfpEditorPage"))
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null } }
@@ -71,8 +72,8 @@ function AdminGuard({ children }) {
   if (!isAuthenticated) return <Navigate to="/login" replace/>
   return hasRole("ADMIN") ? children : <Navigate to="/dashboard" replace/>
 }
-function Page({ component: C }) {
-  return <ErrorBoundary><C/></ErrorBoundary>
+function Page({ component: C, ...props }) {
+  return <ErrorBoundary><C {...props}/></ErrorBoundary>
 }
 
 export default function App() {
@@ -111,9 +112,16 @@ export default function App() {
           <Route path="audit-log" element={<Page component={AuditLogPage}/>}/>
           <Route path="rfp-bids"         element={<Page component={OpportunitiesV2Page}/>}/>
           <Route path="company-settings" element={<Page component={CompanySettingsPage}/>}/>
-          <Route path="rfp-ict"          element={<Page component={RfpIctPage}/>}/>
-          <Route path="rfp-ict/new"      element={<Page component={RfpIctEditorPage}/>}/>
-          <Route path="rfp-ict/:rfpId"   element={<Page component={RfpIctEditorPage}/>}/>
+          {/* Modules 2–4 share the RFP pages; the keys keep each module's page state apart. */}
+          <Route path="rfp-ict"                element={<Page key="ict" component={RfpListPage} module="ict"/>}/>
+          <Route path="rfp-ict/new"            element={<Page key="ict" component={RfpEditorPage} module="ict"/>}/>
+          <Route path="rfp-ict/:rfpId"         element={<Page key="ict" component={RfpEditorPage} module="ict"/>}/>
+          <Route path="rfp-telecom"            element={<Page key="telecom" component={RfpListPage} module="telecom"/>}/>
+          <Route path="rfp-telecom/new"        element={<Page key="telecom" component={RfpEditorPage} module="telecom"/>}/>
+          <Route path="rfp-telecom/:rfpId"     element={<Page key="telecom" component={RfpEditorPage} module="telecom"/>}/>
+          <Route path="expro-requests"         element={<Page key="expro" component={RfpListPage} module="expro"/>}/>
+          <Route path="expro-requests/new"     element={<Page key="expro" component={RfpEditorPage} module="expro"/>}/>
+          <Route path="expro-requests/:rfpId"  element={<Page key="expro" component={RfpEditorPage} module="expro"/>}/>
           <Route path="bonds"            element={<Page component={BondsPage}/>}/>
           <Route path="won-records"      element={<Page component={WonRecordsPage}/>}/>
           <Route path="ai-alerts"        element={<Page component={AiAlertsPage}/>}/>

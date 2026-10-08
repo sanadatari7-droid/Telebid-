@@ -8,7 +8,8 @@ import {
   Users, Bell, LogOut, Search, ChevronDown, BookOpen, Shield,
   Calendar, Eye, History, Globe, Building2, Radio, Antenna,
   Monitor, FileSpreadsheet, Briefcase, Layers, MapPin, X,
-  ChevronRight, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark, Sparkles, BookOpen as LibraryIcon
+  ChevronRight, Zap, Menu, PanelLeftClose, PanelLeftOpen, Landmark, Sparkles, BookOpen as LibraryIcon,
+  RadioTower, University
 } from "lucide-react"
 import clsx from "clsx"
 import { useTranslation } from "react-i18next"
@@ -19,10 +20,11 @@ const NAV_SECTIONS = [
     section: null,
     items: [
       { label: "Dashboard", tKey: "nav.dashboard", path: "/dashboard",  icon: LayoutDashboard, badge: null },
-      // Module 1 (Company) — set up first, so it sits at the top.
+      // The modules, in order. Module 1 (Company) is set up first, so it sits at the top.
       { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2 },
-      // Module 2 (RFP ICT)
-      { label: "RFP ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor },
+      { label: "RFP ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor },     // Module 2
+      { label: "RFP Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower },  // Module 3
+      { label: "EXPRO",            tKey: "nav.exproRequests",   path: "/expro-requests",   icon: University },  // Module 4
     ]
   },
   {
@@ -252,8 +254,9 @@ export default function AppLayout() {
               </div>
             )}
             {section.items.map(item => {
+              // Match whole path segments, so /expro doesn't light up on /expro-requests.
               const isActive = location.pathname === item.path ||
-                (item.path !== "/" && location.pathname.startsWith(item.path))
+                (item.path !== "/" && location.pathname.startsWith(`${item.path}/`))
               const Icon = item.icon
               const label = item.tKey ? t(item.tKey) : item.label
               return (

@@ -1,9 +1,9 @@
-"""Module 2 / Sub-module 3 — bid bond for an ICT RFP.
+"""Sub-module 3 of Modules 2–4 — bid bond for an RFP.
 
-Most fields come from what's already entered: the client (Module 2 client record), the
-submission date and bid bond % (RFP details), and the company initials for the reference
-(Module 1 / Sub-module A). The bond is stored with the other bonds, so it goes through the
-same approval cycle and issuance-office email (Module 1 / Sub-module D) via /bonds/{id}/...
+Most fields come from what's already entered: the client record, the submission date and
+bid bond % (RFP details), and the company initials for the reference (Module 1 /
+Sub-module A). The bond is stored with the other bonds, so it goes through the same
+approval cycle and issuance-office email (Module 1 / Sub-module D) via /bonds/{id}/...
 """
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_one, execute, require_company
 from app.middleware.auth import get_current_user
 from app.api.v1.endpoints.company_config import get_bond_approval_config
+from app.api.v1.endpoints.rfps import MODULES, Module, ModuleSpec
 
-router = APIRouter(prefix="/rfp-ict", tags=["RFP ICT bid bond"])
+router = APIRouter(prefix="/rfps", tags=["RFP bid bond"])
 
 DEFAULT_VALIDITY_DAYS = 90
 
@@ -30,20 +31,20 @@ class BidBondIn(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
 
 
-async def _context(conn, rfp_id: int, company_id: int) -> dict:
+async def _context(conn, rfp_id: int, company_id: int, spec: ModuleSpec) -> dict:
     rfp = await fetch_one(conn, """
-        SELECT r.rfp_id, r.rfp_number, r.rfp_ref, r.rfp_title, r.submission_date, r.tcv,
+        SELECT r.rfp_id, r.rfp_number, r.rfp_ref, r.rfp_title, r.sow, r.submission_date, r.tcv,
                r.bid_bond_required, r.bid_bond_pct,
                c.name_en, c.name_ar, c.billing_address_en, c.billing_address_ar,
                co.company_initials, co.currency_id, COALESCE(co.currency_decimals, 2) AS decimals,
                cur.currency_code
-        FROM rfp_ict r
+        FROM rfps r
         JOIN clients c ON c.client_id = r.client_id
         JOIN companies co ON co.company_id = r.company_id
         LEFT JOIN currencies cur ON cur.currency_id = co.currency_id
-        WHERE r.rfp_id=$1 AND r.company_id=$2""", rfp_id, company_id)
+        WHERE r.rfp_id=$1 AND r.company_id=$2 AND r.module=$3""", rfp_id, company_id, spec.code)
     if not rfp:
-        raise HTTPException(status_code=404, detail="RFP not found")
+        raise HTTPException(status_code=404, detail=f"{spec.noun[0].upper()}{spec.noun[1:]} not found")
     return rfp
 
 
@@ -63,19 +64,20 @@ def _default_ref(rfp: dict) -> str:
     return f"{rfp['company_initials']}-RF: {base}" if rfp["company_initials"] else base
 
 
-async def _payload(conn, rfp_id: int, company_id: int) -> dict:
-    rfp = await _context(conn, rfp_id, company_id)
-    bond = await fetch_one(conn, "SELECT * FROM opportunity_bonds WHERE rfp_ict_id=$1 AND company_id=$2", rfp_id, company_id)
+async def _payload(conn, rfp_id: int, company_id: int, spec: ModuleSpec) -> dict:
+    rfp = await _context(conn, rfp_id, company_id, spec)
+    bond = await fetch_one(conn, "SELECT * FROM opportunity_bonds WHERE rfp_id=$1 AND company_id=$2", rfp_id, company_id)
     pct = rfp["bid_bond_pct"]
     defaults = {
-        "bid_subject": rfp["rfp_title"] or "",
+        # EXPRO requests have no title; their SOW names what is being bid.
+        "bid_subject": (rfp["rfp_title"] or rfp["sow"] or "")[:300],
         "validity_days": DEFAULT_VALIDITY_DAYS,
         "lg_base_value": float(rfp["tcv"]) if rfp["tcv"] is not None else None,
         "bid_ref": _default_ref(rfp),
         "language": "Arabic",
     }
     return {
-        "rfp": {k: rfp[k] for k in ("rfp_number", "rfp_ref", "rfp_title", "submission_date", "tcv",
+        "rfp": {k: rfp[k] for k in ("rfp_number", "rfp_ref", "rfp_title", "sow", "submission_date", "tcv",
                                     "bid_bond_required", "bid_bond_pct", "name_en", "name_ar",
                                     "billing_address_en", "billing_address_ar", "company_initials")},
         "currency": {"code": rfp["currency_code"], "decimals": rfp["decimals"]},
@@ -85,20 +87,23 @@ async def _payload(conn, rfp_id: int, company_id: int) -> dict:
     }
 
 
-@router.get("/{rfp_id}/bid-bond")
-async def get_bid_bond(rfp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
-    return await _payload(conn, rfp_id, require_company(current_user))
+@router.get("/{module}/{rfp_id:int}/bid-bond")
+async def get_bid_bond(module: Module, rfp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    return await _payload(conn, rfp_id, require_company(current_user), MODULES[module])
 
 
-@router.put("/{rfp_id}/bid-bond")
-async def save_bid_bond(rfp_id: int, body: BidBondIn, conn=Depends(get_db), current_user=Depends(get_current_user)):
+@router.put("/{module}/{rfp_id:int}/bid-bond")
+async def save_bid_bond(module: Module, rfp_id: int, body: BidBondIn, conn=Depends(get_db),
+                        current_user=Depends(get_current_user)):
+    spec = MODULES[module]
     company_id = require_company(current_user)
-    rfp = await _context(conn, rfp_id, company_id)
+    rfp = await _context(conn, rfp_id, company_id, spec)
     if not rfp["bid_bond_required"] or rfp["bid_bond_pct"] is None:
         raise HTTPException(status_code=400,
-            detail="This RFP doesn't need a bid bond. Set \"Bid bond required\" to Yes, with a percentage, in RFP details.")
+            detail=f"This {spec.noun} doesn't need a bid bond. Set \"Bid bond required\" to Yes, with a percentage, "
+                   f"in the {spec.noun} details.")
     existing = await fetch_one(conn,
-        "SELECT bond_id, approval_level, status FROM opportunity_bonds WHERE rfp_ict_id=$1 AND company_id=$2", rfp_id, company_id)
+        "SELECT bond_id, approval_level, status FROM opportunity_bonds WHERE rfp_id=$1 AND company_id=$2", rfp_id, company_id)
     if existing and (existing["approval_level"] or 0) > 0:
         raise HTTPException(status_code=400, detail="This bid bond is already being approved, so its details can't change")
 
@@ -119,19 +124,21 @@ async def save_bid_bond(rfp_id: int, body: BidBondIn, conn=Depends(get_db), curr
         await execute(conn, """
             INSERT INTO opportunity_bonds (bid_ref, bid_subject, beneficiary, beneficiary_address, lg_percentage,
                    lg_base_value, bond_amount, currency_id, submission_date, expiry_date, validity_days, language, notes,
-                   rfp_ict_id, bond_type, status, approval_level, requester_name, recipient_name, created_by, company_id)
+                   rfp_id, bond_type, status, approval_level, requester_name, recipient_name, created_by, company_id)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'BID_BOND','PENDING',0,$15,$16,$17,$18)""",
             *values, rfp_id, current_user.full_name, office, current_user.user_id, company_id)
-    return await _payload(conn, rfp_id, company_id)
+    return await _payload(conn, rfp_id, company_id, spec)
 
 
-@router.delete("/{rfp_id}/bid-bond")
-async def delete_bid_bond(rfp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+@router.delete("/{module}/{rfp_id:int}/bid-bond")
+async def delete_bid_bond(module: Module, rfp_id: int, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    spec = MODULES[module]
     company_id = require_company(current_user)
+    await _context(conn, rfp_id, company_id, spec)
     bond = await fetch_one(conn,
-        "SELECT bond_id, approval_level FROM opportunity_bonds WHERE rfp_ict_id=$1 AND company_id=$2", rfp_id, company_id)
+        "SELECT bond_id, approval_level FROM opportunity_bonds WHERE rfp_id=$1 AND company_id=$2", rfp_id, company_id)
     if not bond:
-        raise HTTPException(status_code=404, detail="No bid bond for this RFP")
+        raise HTTPException(status_code=404, detail=f"No bid bond for this {spec.noun}")
     if (bond["approval_level"] or 0) > 0:
         raise HTTPException(status_code=400, detail="This bid bond is already being approved, so it can't be deleted")
     await execute(conn, "DELETE FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond["bond_id"], company_id)

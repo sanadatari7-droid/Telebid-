@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import { Check, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, TrendingUp, UserCheck } from "lucide-react"
-import { rfpIctApi } from "../../services/api"
+import { rfpApi } from "../../services/api"
+import { RFP_MODULES } from "../../utils/rfp"
 import { apiErrorMessage } from "../../utils/apiError"
 import { fmtDT } from "../../utils/fmt"
 
@@ -38,9 +39,11 @@ const VERDICT = {
   NOT_SET_UP: { label: "Not set up", icon: AlertCircle,  cls: "bg-gray-50 border-gray-200 text-gray-700",    bar: "bg-gray-300" },
 }
 
-export default function RfpEvaluation({ rfpId }) {
+export default function RfpEvaluation({ module, rfpId }) {
+  const mod = RFP_MODULES[module]
+  const api = rfpApi(module)
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery({ queryKey: ["rfp-evaluation", rfpId], queryFn: () => rfpIctApi.evaluation(rfpId).then(r => r.data) })
+  const { data, isLoading } = useQuery({ queryKey: ["rfp-evaluation", module, rfpId], queryFn: () => api.evaluation(rfpId).then(r => r.data) })
   const [answers, setAnswers] = useState({})
   const [ebitda, setEbitda] = useState("")
 
@@ -66,15 +69,15 @@ export default function RfpEvaluation({ rfpId }) {
   }, [questions])
 
   const saveMut = useMutation({
-    mutationFn: () => rfpIctApi.saveEvaluation(rfpId, {
+    mutationFn: () => api.saveEvaluation(rfpId, {
       ebitda_pct: ebitda === "" ? null : Number(ebitda),
       answers: Object.entries(answers).filter(([, a]) => a.option_id).map(([qid, a]) => ({ question_id: Number(qid), option_id: a.option_id, comment: a.comment })),
     }),
     onSuccess: r => {
       const v = VERDICT[r.data.result.recommendation]
       toast.success(`Evaluation saved — ${v.label}`)
-      qc.setQueryData(["rfp-evaluation", rfpId], r.data)
-      qc.invalidateQueries({ queryKey: ["rfp-ict"] })
+      qc.setQueryData(["rfp-evaluation", module, rfpId], r.data)
+      qc.invalidateQueries({ queryKey: ["rfps", module] })
     },
     onError: err => toast.error(apiErrorMessage(err, "Couldn't save the evaluation")),
   })
@@ -86,8 +89,8 @@ export default function RfpEvaluation({ rfpId }) {
       <div className="card text-center py-12 space-y-3">
         <ClipboardCheck size={32} className="mx-auto text-gray-300"/>
         <p className="text-gray-700 font-medium">No evaluation questions yet</p>
-        <p className="text-sm text-gray-500">The bid department sets the questions once, then every RFP is evaluated against them.</p>
-        <Link to="/rfp-ict?tab=questions" className="btn-primary inline-flex">Set up evaluation questions</Link>
+        <p className="text-sm text-gray-500">The bid department sets the {mod.title} questions once, then every {mod.noun} is evaluated against them.</p>
+        <Link to={`${mod.path}?tab=questions`} className="btn-primary inline-flex">Set up evaluation questions</Link>
       </div>
     )
   }

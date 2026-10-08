@@ -554,6 +554,37 @@ async def run_migrations():
             ADD COLUMN IF NOT EXISTS office_sent_to      VARCHAR(500),
             ADD COLUMN IF NOT EXISTS office_send_error   TEXT;
         """,
+        # ── Modules 2–4 share the RFP tables, which began as Module 2's rfp_ict* ─
+        # Rename them where they already exist. This runs before the entries below,
+        # so those find the new names instead of creating empty copies.
+        """
+        DO $$ BEGIN
+            IF to_regclass('rfp_ict') IS NOT NULL AND to_regclass('rfps') IS NULL THEN
+                ALTER TABLE rfp_ict RENAME TO rfps;
+            END IF;
+            IF to_regclass('idx_rfp_ict_company_id') IS NOT NULL AND to_regclass('idx_rfps_company_id') IS NULL THEN
+                ALTER INDEX idx_rfp_ict_company_id RENAME TO idx_rfps_company_id;
+            END IF;
+            IF to_regclass('rfp_ict_scope') IS NOT NULL AND to_regclass('rfp_scope') IS NULL THEN
+                ALTER TABLE rfp_ict_scope RENAME TO rfp_scope;
+            END IF;
+            IF to_regclass('rfp_ict_evaluations') IS NOT NULL AND to_regclass('rfp_evaluations') IS NULL THEN
+                ALTER TABLE rfp_ict_evaluations RENAME TO rfp_evaluations;
+            END IF;
+            IF to_regclass('rfp_ict_eval_answers') IS NOT NULL AND to_regclass('rfp_eval_answers') IS NULL THEN
+                ALTER TABLE rfp_ict_eval_answers RENAME TO rfp_eval_answers;
+            END IF;
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                       AND table_name = 'opportunity_bonds' AND column_name = 'rfp_ict_id')
+               AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                       AND table_name = 'opportunity_bonds' AND column_name = 'rfp_id') THEN
+                ALTER TABLE opportunity_bonds RENAME COLUMN rfp_ict_id TO rfp_id;
+            END IF;
+            IF to_regclass('uq_opportunity_bonds_rfp_ict') IS NOT NULL AND to_regclass('uq_opportunity_bonds_rfp') IS NULL THEN
+                ALTER INDEX uq_opportunity_bonds_rfp_ict RENAME TO uq_opportunity_bonds_rfp;
+            END IF;
+        END $$;
+        """,
         # ── Module 2 (RFP ICT): clients, RFPs, scope selections ────────────────
         """
         CREATE TABLE IF NOT EXISTS clients (
@@ -570,7 +601,7 @@ async def run_migrations():
         );
         CREATE INDEX IF NOT EXISTS idx_clients_company_id ON clients(company_id);
         CREATE SEQUENCE IF NOT EXISTS rfp_ict_number_seq START WITH 1;
-        CREATE TABLE IF NOT EXISTS rfp_ict (
+        CREATE TABLE IF NOT EXISTS rfps (
             rfp_id             SERIAL PRIMARY KEY,
             company_id         INT NOT NULL REFERENCES companies(company_id),
             rfp_number         VARCHAR(30) NOT NULL UNIQUE,
@@ -584,17 +615,17 @@ async def run_migrations():
             updated_at         TIMESTAMPTZ DEFAULT NOW(),
             CHECK (bid_bond_required = (bid_bond_pct IS NOT NULL))
         );
-        CREATE INDEX IF NOT EXISTS idx_rfp_ict_company_id ON rfp_ict(company_id);
-        CREATE TABLE IF NOT EXISTS rfp_ict_scope (
-            rfp_id  INT NOT NULL REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+        CREATE INDEX IF NOT EXISTS idx_rfps_company_id ON rfps(company_id);
+        CREATE TABLE IF NOT EXISTS rfp_scope (
+            rfp_id  INT NOT NULL REFERENCES rfps(rfp_id) ON DELETE CASCADE,
             cat_id  INT NOT NULL REFERENCES service_categories(cat_id),
             PRIMARY KEY (rfp_id, cat_id)
         );
         """,
-        # ── rfp_ict: File 2 (bid log) fields; clients.is_strategic ─────────────
+        # ── rfps: File 2 (bid log) fields; clients.is_strategic ────────────────
         """
         -- File 2 (bid log) fields for Module 2
-        ALTER TABLE rfp_ict
+        ALTER TABLE rfps
             ADD COLUMN IF NOT EXISTS rfp_ref          VARCHAR(100),
             ADD COLUMN IF NOT EXISTS channel          VARCHAR(50),
             ADD COLUMN IF NOT EXISTS project_type     VARCHAR(50),
@@ -637,16 +668,16 @@ async def run_migrations():
             sort_order   INT NOT NULL DEFAULT 0,
             is_active    BOOLEAN NOT NULL DEFAULT TRUE
         );
-        CREATE TABLE IF NOT EXISTS rfp_ict_evaluations (
-            rfp_id          INT PRIMARY KEY REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS rfp_evaluations (
+            rfp_id          INT PRIMARY KEY REFERENCES rfps(rfp_id) ON DELETE CASCADE,
             ebitda_pct      NUMERIC(6,2),
             score           NUMERIC(6,2),
             recommendation  VARCHAR(20),
             updated_by      INT REFERENCES users(user_id),
             updated_at      TIMESTAMPTZ DEFAULT NOW()
         );
-        CREATE TABLE IF NOT EXISTS rfp_ict_eval_answers (
-            rfp_id       INT NOT NULL REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS rfp_eval_answers (
+            rfp_id       INT NOT NULL REFERENCES rfps(rfp_id) ON DELETE CASCADE,
             question_id  INT NOT NULL REFERENCES rfp_eval_questions(question_id),
             option_id    INT NOT NULL REFERENCES rfp_eval_options(option_id),
             comment      TEXT,
@@ -655,19 +686,59 @@ async def run_migrations():
             PRIMARY KEY (rfp_id, question_id)
         );
         """,
-        # ── Module 2 / Sub-module 3: RFP ICT bid bonds (stored with the other bonds) ──
+        # ── Sub-module 3: RFP bid bonds (stored with the other bonds) ──────────
         """
-        ALTER TABLE rfp_ict ADD COLUMN IF NOT EXISTS rfp_title VARCHAR(300);
+        ALTER TABLE rfps ADD COLUMN IF NOT EXISTS rfp_title VARCHAR(300);
         ALTER TABLE opportunity_bonds ALTER COLUMN opp_id DROP NOT NULL;
         ALTER TABLE opportunity_bonds
-            ADD COLUMN IF NOT EXISTS rfp_ict_id     INT REFERENCES rfp_ict(rfp_id) ON DELETE CASCADE,
+            ADD COLUMN IF NOT EXISTS rfp_id         INT REFERENCES rfps(rfp_id) ON DELETE CASCADE,
             ADD COLUMN IF NOT EXISTS validity_days  INT;
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_bonds_rfp_ict ON opportunity_bonds(rfp_ict_id) WHERE rfp_ict_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_bonds_rfp ON opportunity_bonds(rfp_id) WHERE rfp_id IS NOT NULL;
         DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_bond_has_parent') THEN
-                ALTER TABLE opportunity_bonds ADD CONSTRAINT chk_bond_has_parent CHECK (opp_id IS NOT NULL OR rfp_ict_id IS NOT NULL);
+                ALTER TABLE opportunity_bonds ADD CONSTRAINT chk_bond_has_parent CHECK (opp_id IS NOT NULL OR rfp_id IS NOT NULL);
             END IF;
         END$$;
+        """,
+        # ── Modules 3 (RFP Telecom) and 4 (EXPRO): same RFP tables, by module ──
+        """
+        ALTER TABLE rfps ADD COLUMN IF NOT EXISTS module VARCHAR(10) NOT NULL DEFAULT 'ICT';
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_rfps_module') THEN
+                ALTER TABLE rfps ADD CONSTRAINT chk_rfps_module CHECK (module IN ('ICT', 'TELECOM', 'EXPRO'));
+            END IF;
+        END$$;
+        CREATE INDEX IF NOT EXISTS idx_rfps_company_module ON rfps(company_id, module);
+        CREATE SEQUENCE IF NOT EXISTS rfp_telecom_number_seq START WITH 1;
+        CREATE SEQUENCE IF NOT EXISTS rfp_expro_number_seq START WITH 1;
+        -- Telecom fields (old app + EXPRO log) and EXPRO's U.Date and comments
+        ALTER TABLE rfps
+            ADD COLUMN IF NOT EXISTS request_date       DATE,
+            ADD COLUMN IF NOT EXISTS sow                TEXT,
+            ADD COLUMN IF NOT EXISTS media              VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS sla                VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS bandwidth_mbps     NUMERIC(12,2),
+            ADD COLUMN IF NOT EXISTS quantity           INT,
+            ADD COLUMN IF NOT EXISTS contract_duration  VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS coverage_study     VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS location           TEXT,
+            ADD COLUMN IF NOT EXISTS attachment_url     TEXT,
+            ADD COLUMN IF NOT EXISTS nrc                NUMERIC(18,4),
+            ADD COLUMN IF NOT EXISTS mrc                NUMERIC(18,4),
+            ADD COLUMN IF NOT EXISTS presales_comment   TEXT,
+            ADD COLUMN IF NOT EXISTS am_comment         TEXT,
+            ADD COLUMN IF NOT EXISTS bid_comment        TEXT;
+        -- Each module has its own evaluation questions and pass mark
+        ALTER TABLE rfp_eval_questions ADD COLUMN IF NOT EXISTS module VARCHAR(10) NOT NULL DEFAULT 'ICT';
+        ALTER TABLE rfp_eval_settings ADD COLUMN IF NOT EXISTS module VARCHAR(10) NOT NULL DEFAULT 'ICT';
+        DO $$ BEGIN
+            IF (SELECT array_length(conkey, 1) FROM pg_constraint
+                WHERE conrelid = 'rfp_eval_settings'::regclass AND contype = 'p') = 1 THEN
+                ALTER TABLE rfp_eval_settings DROP CONSTRAINT rfp_eval_settings_pkey;
+                ALTER TABLE rfp_eval_settings ADD PRIMARY KEY (company_id, module);
+            END IF;
+        END$$;
+        CREATE INDEX IF NOT EXISTS idx_rfp_eval_questions_module ON rfp_eval_questions(company_id, module);
         """,
     ]
 
