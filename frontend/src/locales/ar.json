@@ -30,6 +30,7 @@
   },
   "nav": {
     "dashboard": "لوحة التحكم",
+    "sectionModules": "الوحدات",
     "sectionPipeline": "مسار الأعمال",
     "rfpBids": "طلبات العروض والمناقصات",
     "allBids": "جميع المناقصات",

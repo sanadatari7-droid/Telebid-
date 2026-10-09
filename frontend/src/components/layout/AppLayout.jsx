@@ -20,11 +20,16 @@ const NAV_SECTIONS = [
     section: null,
     items: [
       { label: "Dashboard", tKey: "nav.dashboard", path: "/dashboard",  icon: LayoutDashboard, badge: null },
-      // The modules, in order. Module 1 (Company) is set up first, so it sits at the top.
-      { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2 },
-      { label: "RFP ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor },     // Module 2
-      { label: "RFP Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower },  // Module 3
-      { label: "EXPRO",            tKey: "nav.exproRequests",   path: "/expro-requests",   icon: University },  // Module 4
+    ]
+  },
+  {
+    // The four modules, in order. Module 1 (Company) is set up first.
+    section: "Modules", sectionTKey: "nav.sectionModules",
+    items: [
+      { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2,  num: 1 },
+      { label: "RFP ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor,    num: 2 },
+      { label: "RFP Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower, num: 3 },
+      { label: "EXPRO",            tKey: "nav.exproRequests",   path: "/expro-requests",   icon: University, num: 4 },
     ]
   },
   {
@@ -268,6 +273,10 @@ export default function AppLayout() {
                   )}>
                   <Icon size={16} className="flex-shrink-0"/>
                   {!collapsed && <span className="truncate">{label}</span>}
+                  {!collapsed && item.num && (
+                    <span className={clsx("ml-auto text-[10px] font-bold rounded-md w-5 h-5 flex items-center justify-center flex-shrink-0",
+                      isActive ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")} title={`Module ${item.num}`}>{item.num}</span>
+                  )}
                   {!collapsed && item.badge != null && item.badge > 0 && (
                     <span className="ml-auto bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
                       {item.badge > 9 ? "9+" : item.badge}
