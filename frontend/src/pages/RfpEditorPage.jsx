@@ -289,7 +289,7 @@ function RfpEditor({ module, rfpId }) {
   const need = (cond, label) => (cond ? [] : [label])
   const moneyNeeded = !isDropped
   const clientStep = {
-    id: "client", num: "1", title: party, hint: mod.expro ? "The government entity that posted the request." : "Who the RFP is from. Pick from the list, or add a new client once.",
+    id: "client", num: "1", title: "Client name & billing address", hint: mod.expro ? "The government entity that posted the request." : "Who the RFP is from. Pick from the list, or add a new client once.",
     missing: () => need(form.client_id, party.toLowerCase()),
   }
   const steps = mod.expro ? [
