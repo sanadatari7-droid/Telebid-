@@ -739,6 +739,24 @@ async def run_migrations():
             END IF;
         END$$;
         CREATE INDEX IF NOT EXISTS idx_rfp_eval_questions_module ON rfp_eval_questions(company_id, module);
+        """,        # ── Sub-module 4: RFP checklist (site visit, special terms, insurance) ──
+        """
+        CREATE TABLE IF NOT EXISTS rfp_checklists (
+            rfp_id                      INT PRIMARY KEY REFERENCES rfps(rfp_id) ON DELETE CASCADE,
+            site_visit_required         BOOLEAN NOT NULL,
+            site_visit_am_id            INT REFERENCES company_account_managers(am_id),
+            special_terms_required      BOOLEAN NOT NULL,
+            special_terms               TEXT,
+            special_terms_status        VARCHAR(20) CHECK (special_terms_status IN ('PENDING', 'APPROVED', 'NOT_APPROVED')),
+            special_terms_decided_by    INT REFERENCES users(user_id),
+            special_terms_decider_name  VARCHAR(150),
+            special_terms_decided_at    TIMESTAMPTZ,
+            special_terms_note          TEXT,
+            insurance_required          BOOLEAN NOT NULL,
+            insurance_policies          TEXT[] NOT NULL DEFAULT '{}',
+            updated_by                  INT REFERENCES users(user_id),
+            updated_at                  TIMESTAMPTZ DEFAULT NOW()
+        );
         """,
     ]
 

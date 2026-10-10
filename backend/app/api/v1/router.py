@@ -13,7 +13,7 @@ from app.api.v1.endpoints import (
     settings, ict, expro, bid_logs,
     search, location, excel_import,
     content_library,
-    clients, rfps, rfp_evaluation, rfp_bond
+    clients, rfps, rfp_evaluation, rfp_bond, rfp_checklist
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -22,6 +22,7 @@ api_router.include_router(clients.router)
 api_router.include_router(rfps.router)
 api_router.include_router(rfp_evaluation.router)
 api_router.include_router(rfp_bond.router)
+api_router.include_router(rfp_checklist.router)
 api_router.include_router(opportunities_v2.router)
 api_router.include_router(bonds.router)
 api_router.include_router(service_categories.router)

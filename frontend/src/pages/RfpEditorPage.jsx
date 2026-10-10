@@ -13,6 +13,7 @@ import { fmt } from "../utils/fmt"
 import { RFP_MODULES, buildTree, STATUS_STYLE, LOST_STATUSES, optionLabel, formatMoney, techLine } from "../utils/rfp"
 import RfpEvaluation from "../components/rfp/RfpEvaluation"
 import RfpBidBond from "../components/rfp/RfpBidBond"
+import RfpChecklist from "../components/rfp/RfpChecklist"
 
 // bid_bond_required starts empty (null) so Yes or No has to be chosen before moving on.
 const EMPTY = {
@@ -234,7 +235,7 @@ function RfpEditor({ module, rfpId }) {
   const { i18n } = useTranslation()
   const lang = i18n.language
   const [params, setParams] = useSearchParams()
-  const tab = !isNew && ["evaluation", "bond"].includes(params.get("tab")) ? params.get("tab") : "details"
+  const tab = !isNew && ["evaluation", "bond", "checklist"].includes(params.get("tab")) ? params.get("tab") : "details"
   const party = mod.expro ? "Government entity" : "Client"
 
   const { data: meta } = useQuery({ queryKey: ["rfp-lists", module], queryFn: () => api.lists().then(r => r.data) })
@@ -641,7 +642,7 @@ function RfpEditor({ module, rfpId }) {
             )}
           </div>
           <div className="flex items-center gap-1 ml-auto bg-gray-100 rounded-xl p-1">
-            {[["details", `1 · ${mod.expro ? "Request" : "RFP"} details`], ["evaluation", "2 · Evaluation"], ["bond", "3 · Bid bond"]].map(([id, lbl]) => (
+            {[["details", `1 · ${mod.expro ? "Request" : "RFP"} details`], ["evaluation", "2 · Evaluation"], ["bond", "3 · Bid bond"], ["checklist", "4 · Checklist"]].map(([id, lbl]) => (
               <button key={id} disabled={isNew && id !== "details"} title={isNew && id !== "details" ? `Create the ${mod.noun} first` : undefined}
                 onClick={() => setParams(id === "details" ? {} : { tab: id })}
                 className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed",
@@ -661,6 +662,8 @@ function RfpEditor({ module, rfpId }) {
 
       {tab === "evaluation" ? (
         <div className="max-w-screen-xl mx-auto p-6"><RfpEvaluation module={module} rfpId={rfpId}/></div>
+      ) : tab === "checklist" ? (
+        <div className="max-w-screen-xl mx-auto p-6"><RfpChecklist module={module} rfpId={rfpId}/></div>
       ) : tab === "bond" ? (
         <div className="max-w-screen-xl mx-auto p-6"><RfpBidBond module={module} rfpId={rfpId} onGoToDetails={() => setParams({})}/></div>
       ) : (

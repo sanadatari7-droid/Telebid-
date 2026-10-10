@@ -406,6 +406,10 @@ export const rfpApi = module => {
     bidBond:           id => api.get(`${base}/${id}/bid-bond`),
     saveBidBond:       (id, d) => api.put(`${base}/${id}/bid-bond`, d),
     deleteBidBond:     id => api.delete(`${base}/${id}/bid-bond`),
+    checklist:         id => api.get(`${base}/${id}/checklist`),
+    saveChecklist:     (id, d) => api.put(`${base}/${id}/checklist`, d),
+    decideTerms:       (id, d) => api.post(`${base}/${id}/checklist/special-terms`, d),
+    addPolicy:         label => api.post(`${base}/insurance-policies`, { label }),
   }
 }
 
