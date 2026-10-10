@@ -53,9 +53,13 @@ async def translate_to_arabic(text: str, kind: TextKind) -> str:
 
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     try:
-        response = await client.messages.parse(
+        # Server-side fallback: if the model declines, the API re-runs the request on a fallback model.
+        response = await client.beta.messages.parse(
             model=settings.ANTHROPIC_MODEL,
             max_tokens=16000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            output_config={"effort": "low"},  # a short translation needs little reasoning
             system=(
                 "You convert English text into Arabic for a bid and tender management system "
                 "used by a company in the Gulf region. " + _INSTRUCTIONS[kind]

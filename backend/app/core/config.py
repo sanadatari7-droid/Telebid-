@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # Leave blank to run without it — the endpoints degrade to a clear
     # "not configured" response instead of failing.
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-opus-5"
+    ANTHROPIC_MODEL: str = "claude-opus-5-5"
 
     class Config:
         env_file = ".env"
