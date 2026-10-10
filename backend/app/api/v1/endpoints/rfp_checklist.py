@@ -1,4 +1,4 @@
-"""Sub-module 4 of Modules 2–4 — the RFP checklist.
+"""Sub-module C of Modules 2–4 (after B, the bid bond) — the RFP checklist.
 
 - Site visit: Yes / No; if Yes, the sales person assigned to it.
 - Others — special terms and conditions: if there are any, the bid department approves

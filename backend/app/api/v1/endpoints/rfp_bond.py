@@ -1,4 +1,4 @@
-"""Sub-module 3 of Modules 2–4 — bid bond for an RFP.
+"""Sub-module B of Modules 2–4 — bid bond for an RFP.
 
 Most fields come from what's already entered: the client record, the submission date and
 bid bond % (RFP details), and the company initials for the reference (Module 1 /

@@ -2056,7 +2056,7 @@ END$$;
 CREATE INDEX IF NOT EXISTS idx_rfp_eval_questions_module ON rfp_eval_questions(company_id, module);
 
 
--- Sub-module 4: RFP checklist — site visit (with the assigned sales person), special terms
+-- Sub-module C: RFP checklist — site visit (with the assigned sales person), special terms
 -- and conditions (approved or not by the bid department), and the insurance policies required.
 CREATE TABLE IF NOT EXISTS rfp_checklists (
     rfp_id                      INT PRIMARY KEY REFERENCES rfps(rfp_id) ON DELETE CASCADE,

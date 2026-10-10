@@ -453,7 +453,7 @@ function RfpEditor({ module, rfpId }) {
           <YesNo value={form.bid_bond_required} onChange={v => setForm(p => ({ ...p, bid_bond_required: v, bid_bond_pct: v ? p.bid_bond_pct : "" }))}/>
         </Field>
         {form.bid_bond_required && (
-          <Field label="Bid bond percentage" required hint="The bid bond itself is requested in tab 3 · Bid bond, after this is saved.">
+          <Field label="Bid bond percentage" required hint="The bid bond itself is requested in sub-module B · Bid bond, after this is saved.">
             <select className="input max-w-xs" value={form.bid_bond_pct} onChange={e => set("bid_bond_pct", e.target.value ? Number(e.target.value) : "")}>
               <option value="">Choose the percentage…</option>
               {(meta?.bid_bond_pcts || [1, 2, 3]).map(p => <option key={p} value={p}>{p}%</option>)}
@@ -642,7 +642,7 @@ function RfpEditor({ module, rfpId }) {
             )}
           </div>
           <div className="flex items-center gap-1 ml-auto bg-gray-100 rounded-xl p-1">
-            {[["details", `1 · ${mod.expro ? "Request" : "RFP"} details`], ["evaluation", "2 · Evaluation"], ["bond", "3 · Bid bond"], ["checklist", "4 · Checklist"]].map(([id, lbl]) => (
+            {[["details", `${mod.expro ? "Request" : "RFP"} details`], ["evaluation", "A · Evaluation"], ["bond", "B · Bid bond"], ["checklist", "C · Checklist"]].map(([id, lbl]) => (
               <button key={id} disabled={isNew && id !== "details"} title={isNew && id !== "details" ? `Create the ${mod.noun} first` : undefined}
                 onClick={() => setParams(id === "details" ? {} : { tab: id })}
                 className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed",

@@ -1,4 +1,4 @@
-"""Sub-module 2 of Modules 2–4 — Go / No-Go evaluation of an RFP.
+"""Sub-module A of Modules 2–4 — Go / No-Go evaluation of an RFP.
 
 The bid department sets the questions once per module: each has a weight (all weights
 add up to 100%) and answer options, each worth a % of that weight. For an RFP, the score
