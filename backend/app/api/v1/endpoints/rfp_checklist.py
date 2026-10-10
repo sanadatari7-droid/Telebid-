@@ -87,7 +87,8 @@ async def _payload(conn, module: Module, rfp_id: int, current_user) -> dict:
     }
 
 
-async def _tell_bid_manager(conn, rfp_id: int, company_id: int, subject: str, lines: List[str]):
+async def _tell_bid_manager(conn, rfp_id: int, company_id: int, subject: str, lines: List[str],
+                            notif_type: str = "RFP_TERMS"):
     """Email the RFP's bid manager (when email is set up) and add an in-app notification."""
     bm = await fetch_one(conn, """
         SELECT bm.user_id, bm.email, bm.full_name, r.rfp_number FROM rfps r
@@ -96,8 +97,8 @@ async def _tell_bid_manager(conn, rfp_id: int, company_id: int, subject: str, li
         return
     title = f"{bm['rfp_number']}: {subject}"
     if bm["user_id"]:
-        await execute(conn, "INSERT INTO notifications (user_id, notif_type, title, body, company_id) VALUES ($1,'RFP_TERMS',$2,$3,$4)",
-                      bm["user_id"], title[:200], "\n".join(lines), company_id)
+        await execute(conn, "INSERT INTO notifications (user_id, notif_type, title, body, company_id) VALUES ($1,$2,$3,$4,$5)",
+                      bm["user_id"], notif_type, title[:200], "\n".join(lines), company_id)
     if bm["email"] and await smtp_configured(company_id):
         body = "".join(f"<p>{html.escape(l)}</p>" for l in lines)
         await send_email(bm["email"], title, body, "\n".join(lines), company_id)

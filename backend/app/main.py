@@ -759,6 +759,42 @@ async def run_migrations():
             updated_at                  TIMESTAMPTZ DEFAULT NOW()
         );
         """,
+        # ── Sub-module D: pricing approval per bid; bid bond issuance & return ──
+        """
+        CREATE TABLE IF NOT EXISTS rfp_pricing (
+            rfp_id             INT PRIMARY KEY REFERENCES rfps(rfp_id) ON DELETE CASCADE,
+            basis              VARCHAR(10) NOT NULL CHECK (basis IN ('MARGIN', 'DISCOUNT')),
+            cost               NUMERIC(18,2),
+            price              NUMERIC(18,2) NOT NULL,
+            list_price         NUMERIC(18,2),
+            ebitda_pct         NUMERIC(6,2),
+            pct                NUMERIC(7,2) NOT NULL,
+            required_level     SMALLINT NOT NULL CHECK (required_level BETWEEN 1 AND 3),
+            approval_level     SMALLINT NOT NULL DEFAULT 0,
+            status             VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'SENT_BACK')),
+            notes              TEXT,
+            l1_approved_by     INT REFERENCES users(user_id),
+            l1_approver_name   VARCHAR(150),
+            l1_approved_at     TIMESTAMPTZ,
+            l2_approved_by     INT REFERENCES users(user_id),
+            l2_approver_name   VARCHAR(150),
+            l2_approved_at     TIMESTAMPTZ,
+            l3_approved_by     INT REFERENCES users(user_id),
+            l3_approver_name   VARCHAR(150),
+            l3_approved_at     TIMESTAMPTZ,
+            sent_back_by_name  VARCHAR(150),
+            sent_back_at       TIMESTAMPTZ,
+            sent_back_note     TEXT,
+            submitted_by       INT REFERENCES users(user_id),
+            submitted_by_name  VARCHAR(150),
+            submitted_at       TIMESTAMPTZ,
+            updated_at         TIMESTAMPTZ DEFAULT NOW()
+        );
+        -- Bid bond issuance and return: the client gives the bond back after the award.
+        ALTER TABLE opportunity_bonds
+            ADD COLUMN IF NOT EXISTS released_on  DATE,
+            ADD COLUMN IF NOT EXISTS release_note TEXT;
+        """,
     ]
 
     async with pool.acquire() as conn:

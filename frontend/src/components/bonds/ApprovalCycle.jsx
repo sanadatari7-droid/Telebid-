@@ -47,7 +47,8 @@ export default function ApprovalCycle({ bond, onChange }) {
     onError: err => { toast.error(apiErrorMessage(err, "Couldn't send the request")); invalidateBonds(qc, bond.bond_id); onChange?.() }
   })
 
-  const fullyApproved = ["APPROVED","REQUESTED","ISSUED"].includes(bond.status)
+  const fullyApproved = ["APPROVED","REQUESTED","ISSUED","RELEASED"].includes(bond.status)
+  const done = ["ISSUED","RELEASED"].includes(bond.status)
 
   return (
     <div className="card-sm bg-blue-50 border-blue-100 space-y-2">
@@ -82,6 +83,8 @@ export default function ApprovalCycle({ bond, onChange }) {
         </div>
         {bond.office_sent_at ? (
           <span className="text-xs text-green-700 font-medium break-all">✓ Sent to {bond.office_sent_to} · {fmtDT(bond.office_sent_at)}</span>
+        ) : done ? (
+          <span className="text-xs text-gray-400">Bond already issued</span>
         ) : fullyApproved ? (
           <button className="btn-secondary btn-sm" disabled={sendMut.isPending} onClick={() => sendMut.mutate()}>
             <Send size={12}/> {sendMut.isPending ? "Sending…" : "Send to office"}
@@ -90,7 +93,7 @@ export default function ApprovalCycle({ bond, onChange }) {
           <span className="text-xs text-gray-400">Sent after Level 3</span>
         )}
       </div>
-      {bond.office_send_error && !bond.office_sent_at && (
+      {bond.office_send_error && !bond.office_sent_at && !done && (
         <div className="flex items-start gap-2 text-xs text-red-600">
           <AlertTriangle size={13} className="flex-shrink-0 mt-0.5"/> {bond.office_send_error}
         </div>

@@ -5,7 +5,7 @@ bid bond % (RFP details), and the company initials for the reference (Module 1 /
 Sub-module A). The bond is stored with the other bonds, so it goes through the same
 approval cycle and issuance-office email (Module 1 / Sub-module D) via /bonds/{id}/...
 """
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal, Optional
 
@@ -20,6 +20,17 @@ from app.api.v1.endpoints.rfps import MODULES, Module, ModuleSpec
 router = APIRouter(prefix="/rfps", tags=["RFP bid bond"])
 
 DEFAULT_VALIDITY_DAYS = 90
+
+
+class IssuedIn(BaseModel):
+    bond_number: str = Field(..., min_length=1, max_length=100)
+    issuer_bank: str = Field(..., min_length=1, max_length=200)
+    issue_date: date
+
+
+class ReturnedIn(BaseModel):
+    returned_on: date
+    note: Optional[str] = Field(None, max_length=1000)
 
 
 class BidBondIn(BaseModel):
@@ -143,3 +154,44 @@ async def delete_bid_bond(module: Module, rfp_id: int, conn=Depends(get_db), cur
         raise HTTPException(status_code=400, detail="This bid bond is already being approved, so it can't be deleted")
     await execute(conn, "DELETE FROM opportunity_bonds WHERE bond_id=$1 AND company_id=$2", bond["bond_id"], company_id)
     return {"message": "Bid bond request deleted"}
+
+
+async def _bond_for(conn, module: Module, rfp_id: int, company_id: int):
+    spec = MODULES[module]
+    await _context(conn, rfp_id, company_id, spec)
+    bond = await fetch_one(conn, "SELECT bond_id, status FROM opportunity_bonds WHERE rfp_id=$1 AND company_id=$2",
+                           rfp_id, company_id)
+    if not bond:
+        raise HTTPException(status_code=404, detail=f"No bid bond for this {spec.noun}")
+    return spec, bond
+
+
+@router.post("/{module}/{rfp_id:int}/bid-bond/issued")
+async def bid_bond_issued(module: Module, rfp_id: int, body: IssuedIn, conn=Depends(get_db),
+                          current_user=Depends(get_current_user)):
+    """The bank has issued the bond: record its number, the bank and the issue date."""
+    company_id = require_company(current_user)
+    spec, bond = await _bond_for(conn, module, rfp_id, company_id)
+    if bond["status"] not in ("APPROVED", "REQUESTED", "ISSUED"):
+        raise HTTPException(status_code=400, detail="The bond can be marked issued only after all three approval levels")
+    await execute(conn, """
+        UPDATE opportunity_bonds SET bond_number=$1, issuer_bank=$2, issue_date=$3, status='ISSUED',
+               approved_by=COALESCE(approved_by, $4), approved_at=COALESCE(approved_at, NOW()), updated_at=NOW()
+        WHERE bond_id=$5 AND company_id=$6""",
+        body.bond_number.strip(), body.issuer_bank.strip(), body.issue_date, current_user.user_id, bond["bond_id"], company_id)
+    return await _payload(conn, rfp_id, company_id, spec)
+
+
+@router.post("/{module}/{rfp_id:int}/bid-bond/returned")
+async def bid_bond_returned(module: Module, rfp_id: int, body: ReturnedIn, conn=Depends(get_db),
+                            current_user=Depends(get_current_user)):
+    """The client has given the bond back (after the award), so it is released at the bank."""
+    company_id = require_company(current_user)
+    spec, bond = await _bond_for(conn, module, rfp_id, company_id)
+    if bond["status"] not in ("ISSUED", "RELEASED"):
+        raise HTTPException(status_code=400, detail="Only an issued bond can be marked returned")
+    await execute(conn, """
+        UPDATE opportunity_bonds SET status='RELEASED', released_on=$1, release_note=$2, updated_at=NOW()
+        WHERE bond_id=$3 AND company_id=$4""",
+        body.returned_on, (body.note or "").strip() or None, bond["bond_id"], company_id)
+    return await _payload(conn, rfp_id, company_id, spec)

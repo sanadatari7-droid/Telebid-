@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import clsx from "clsx"
-import { Check, Shield, Trash2, Lock, ArrowRight } from "lucide-react"
+import { Check, Shield, Trash2, Lock, ArrowRight, Landmark, Undo2 } from "lucide-react"
 import { rfpApi } from "../../services/api"
 import { apiErrorMessage } from "../../utils/apiError"
 import { fmt } from "../../utils/fmt"
@@ -20,6 +20,66 @@ function Row({ num, label, source, children }) {
         {source && <div className="text-xs text-gray-400 mt-1 sm:ml-7">{source}</div>}
       </div>
       <div className="min-w-0">{children}</div>
+    </div>
+  )
+}
+
+// After the issuance office: the bank issues the bond, and after the award the client returns it.
+function IssueAndReturn({ api, rfpId, bond, onSaved }) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [f, setF] = useState({ bond_number: "", issuer_bank: "", issue_date: today, returned_on: today, note: "" })
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  const issueMut = useMutation({
+    mutationFn: () => api.bondIssued(rfpId, { bond_number: f.bond_number, issuer_bank: f.issuer_bank, issue_date: f.issue_date }),
+    onSuccess: r => { toast.success("Bond marked as issued"); onSaved(r.data) },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't save")),
+  })
+  const returnMut = useMutation({
+    mutationFn: () => api.bondReturned(rfpId, { returned_on: f.returned_on, note: f.note }),
+    onSuccess: r => { toast.success("Bond marked as returned"); onSaved(r.data) },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't save")),
+  })
+  const step = (n, label, done) => (
+    <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+      <span className={clsx("w-6 h-6 rounded-lg text-xs font-bold flex items-center justify-center", done ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600")}>{done ? "✓" : n}</span>{label}
+    </div>
+  )
+  const issued = ["ISSUED", "RELEASED"].includes(bond.status)
+  const ready = ["APPROVED", "REQUESTED"].includes(bond.status)
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5"><Landmark size={12}/> Issuance &amp; return</div>
+      {step(1, "Bank issued the bond", issued)}
+      {issued ? (
+        <div className="text-xs text-gray-600 ml-8 space-y-0.5">
+          <div>Bond no. <strong className="font-mono">{bond.bond_number}</strong></div>
+          <div>{bond.issuer_bank} · issued {fmt(bond.issue_date)}</div>
+          <div>Valid until {fmt(bond.expiry_date)}</div>
+        </div>
+      ) : ready ? (
+        <div className="ml-8 space-y-2">
+          <input className="input text-sm" placeholder="Bond number" value={f.bond_number} onChange={e => set("bond_number", e.target.value)}/>
+          <input className="input text-sm" placeholder="Bank, e.g. Saudi National Bank" value={f.issuer_bank} onChange={e => set("issuer_bank", e.target.value)}/>
+          <label className="block text-xs text-gray-500">Issue date<input type="date" className="input text-sm mt-1" value={f.issue_date} onChange={e => set("issue_date", e.target.value)}/></label>
+          <button className="btn-primary btn-sm w-full justify-center" disabled={!f.bond_number.trim() || !f.issuer_bank.trim() || !f.issue_date || issueMut.isPending}
+            onClick={() => issueMut.mutate()}><Check size={12}/> {issueMut.isPending ? "Saving…" : "Mark as issued"}</button>
+        </div>
+      ) : <p className="text-xs text-gray-400 ml-8">Available once all three levels have approved.</p>}
+
+      {step(2, "Client returned the bond", bond.status === "RELEASED")}
+      {bond.status === "RELEASED" ? (
+        <div className="text-xs text-gray-600 ml-8">Returned {fmt(bond.released_on)}{bond.release_note ? ` · ${bond.release_note}` : ""}</div>
+      ) : bond.status === "ISSUED" ? (
+        <div className="ml-8 space-y-2">
+          <label className="block text-xs text-gray-500">Returned on<input type="date" className="input text-sm mt-1" value={f.returned_on} onChange={e => set("returned_on", e.target.value)}/></label>
+          <input className="input text-sm" placeholder="Note (optional), e.g. returned after award" value={f.note} onChange={e => set("note", e.target.value)}/>
+          <button className="btn-secondary btn-sm w-full justify-center" disabled={!f.returned_on || returnMut.isPending}
+            onClick={() => returnMut.mutate()}><Undo2 size={12}/> {returnMut.isPending ? "Saving…" : "Mark as returned"}</button>
+          {bond.expiry_date && new Date(bond.expiry_date) < new Date() && (
+            <p className="text-xs text-red-600">The bond expired on {fmt(bond.expiry_date)} — get it back from the client or extend it.</p>
+          )}
+        </div>
+      ) : <p className="text-xs text-gray-400 ml-8">After the award, record when the client gives it back.</p>}
     </div>
   )
 }
@@ -175,6 +235,7 @@ export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
         {bond ? (
           <>
             <ApprovalCycle bond={bond} onChange={() => qc.invalidateQueries({ queryKey: key })}/>
+            <IssueAndReturn api={api} rfpId={rfpId} bond={bond} onSaved={d => { qc.setQueryData(key, d); qc.invalidateQueries({ queryKey: ["bonds"] }) }}/>
             <Link to="/bonds" className="text-xs text-blue-600 hover:underline block text-center">Also listed on the Bonds page</Link>
           </>
         ) : (

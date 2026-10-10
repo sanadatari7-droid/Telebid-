@@ -416,6 +416,12 @@ export const rfpApi = module => {
     decideTerms:       (id, d) => api.post(`${base}/${id}/checklist/special-terms`, d),
     addPolicy:         label => api.post(`${base}/insurance-policies`, { label }),
     addTeamMember:     d => api.post(`${base}/team-members`, d),
+    bondIssued:        (id, d) => api.post(`${base}/${id}/bid-bond/issued`, d),
+    bondReturned:      (id, d) => api.post(`${base}/${id}/bid-bond/returned`, d),
+    pricing:           id => api.get(`${base}/${id}/pricing`),
+    savePricing:       (id, d) => api.put(`${base}/${id}/pricing`, d),
+    approvePricing:    (id, level) => api.post(`${base}/${id}/pricing/approve`, { level }),
+    sendBackPricing:   (id, note) => api.post(`${base}/${id}/pricing/send-back`, { note }),
   }
 }
 

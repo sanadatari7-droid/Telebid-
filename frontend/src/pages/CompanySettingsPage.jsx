@@ -510,7 +510,7 @@ function PricingApprovalSection() {
       <div className="card space-y-4">
         <div className="section-title flex items-center gap-2"><TrendingUp size={13}/> C — Pricing Approval Cycle</div>
         <div className="alert-info text-xs">
-          Pricing is approved in sequence. Each level's title can be renamed to match your organisation.
+          Pricing is approved in sequence. Each level's title can be renamed to match your organisation. It is used on every bid's "D · Pricing" tab: the margin (ICT) or discount (Telecom, EXPRO) decides how far up the levels the pricing has to go.
         </div>
         <div className="flex items-stretch gap-2">
           {["l1_title","l2_title","l3_title"].map((k, i) => (
@@ -598,7 +598,7 @@ function BondApprovalSection() {
       <div className="card space-y-4">
         <div className="section-title flex items-center gap-2"><Shield size={13}/> D — Bid Bond Approval Cycle</div>
         <div className="alert-info text-xs">
-          Every bond request is approved in this order. Once the last level approves, the request is sent to the issuance office.
+          Every bond request is approved in this order. Once the last level approves, the request is sent to the issuance office. Then, on the bid's "B · Bid bond" tab, record when the bank issues the bond and when the client returns it.
         </div>
         <div className="flex items-stretch gap-2">
           {["l1_title","l2_title","l3_title"].map((k, i) => (
