@@ -12,7 +12,7 @@ the scope-of-work list, the drop-down lists and which fields the module uses.
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Dict, FrozenSet, List, Optional
+from typing import Dict, FrozenSet, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -407,6 +407,44 @@ async def team_options(module: Module, conn=Depends(get_db), current_user=Depend
             SELECT emp_id AS id, full_name AS name, job_title FROM employees
             WHERE company_id=$1 AND is_active=TRUE AND employee_type='PRESALES' ORDER BY full_name""", company_id),
     }
+
+
+class TeamMemberIn(BaseModel):
+    role: Literal["account_manager", "presales", "bid_manager"]
+    full_name: str = Field(..., min_length=1, max_length=150)
+    email: Optional[str] = Field(None, max_length=200)
+
+
+@router.post("/{module}/team-members", status_code=201)
+async def add_team_member(module: Module, body: TeamMemberIn, conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """Adds a team member from the bid form, so a missing name doesn't stop the user mid-way.
+    The same lists are managed in Company Settings (account managers, bid specialists) and Employees (presales)."""
+    company_id = require_company(current_user)
+    name, email = body.full_name.strip(), (body.email or "").strip() or None
+    initials = "".join(w[0] for w in name.split()[:3]).upper() or None
+    if body.role == "presales":
+        existing = await fetch_val(conn, """SELECT emp_id FROM employees WHERE company_id=$1 AND is_active=TRUE
+            AND employee_type='PRESALES' AND lower(full_name)=lower($2)""", company_id, name)
+        if existing:
+            return {"id": existing, "name": name}
+        n = await fetch_val(conn, "SELECT COUNT(*)+1 FROM employees WHERE company_id=$1", company_id)
+        code = f"PS-{company_id}-{n}"
+        while await fetch_val(conn, "SELECT 1 FROM employees WHERE employee_code=$1", code):
+            n += 1
+            code = f"PS-{company_id}-{n}"
+        emp_id = await fetch_val(conn, """
+            INSERT INTO employees (employee_code, full_name, email, employee_type, company_id)
+            VALUES ($1,$2,$3,'PRESALES',$4) RETURNING emp_id""", code, name, email or "", company_id)
+        return {"id": emp_id, "name": name}
+    table, id_col = (("company_account_managers", "am_id") if body.role == "account_manager"
+                     else ("company_bid_managers", "bm_id"))
+    existing = await fetch_val(conn, f"SELECT {id_col} FROM {table} WHERE company_id=$1 AND is_active=TRUE AND lower(full_name)=lower($2)",
+                               company_id, name)
+    if existing:
+        return {"id": existing, "name": name}
+    new_id = await fetch_val(conn, f"INSERT INTO {table} (company_id, full_name, initials, email) VALUES ($1,$2,$3,$4) RETURNING {id_col}",
+                             company_id, name, initials, email)
+    return {"id": new_id, "name": name}
 
 
 # ── RFPs ──────────────────────────────────────────────────────────────────────

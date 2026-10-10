@@ -14,6 +14,7 @@ import { RFP_MODULES, buildTree, STATUS_STYLE, LOST_STATUSES, optionLabel, forma
 import RfpEvaluation from "../components/rfp/RfpEvaluation"
 import RfpBidBond from "../components/rfp/RfpBidBond"
 import RfpChecklist from "../components/rfp/RfpChecklist"
+import { useAuthStore } from "../store/authStore"
 
 // bid_bond_required starts empty (null) so Yes or No has to be chosen before moving on.
 const EMPTY = {
@@ -136,18 +137,50 @@ function MultiSelect({ groups, selected, onToggle, placeholder }) {
   )
 }
 
+// "+ Add new" under a list, so a missing option never stops the user mid-way.
+function AddInline({ label, placeholder, onAdd, children }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    if (!name.trim() || busy) return
+    setBusy(true)
+    try { if (await onAdd(name.trim())) { setName(""); setOpen(false) } } finally { setBusy(false) }
+  }
+  if (!open) return (
+    <button type="button" className="mt-1.5 text-xs font-medium text-blue-600 hover:underline flex items-center gap-1" onClick={() => setOpen(true)}>
+      <Plus size={12}/> {label}
+    </button>
+  )
+  return (
+    <div className="mt-2 flex flex-wrap gap-2 items-center">
+      {children}
+      <input className="input !py-1.5 text-sm flex-1 min-w-[160px]" autoFocus placeholder={placeholder} value={name}
+        onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false) }}/>
+      <button type="button" className="btn-primary btn-sm" disabled={!name.trim() || busy} onClick={submit}><Check size={12}/> Add</button>
+      <button type="button" className="btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancel</button>
+    </div>
+  )
+}
+
 const isLink = v => /^https?:\/\//i.test((v || "").trim())
 
 // ── New client (English with automatic Arabic) ────────────────────────────────
+// Once the translation service says it's unavailable, stop asking for the rest of the visit.
+let translationDown = false
+
 function useArabicAutofill(kind) {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(translationDown ? "Automatic Arabic isn't available right now. Please type it." : "")
   const run = async (english, currentArabic, wasAuto, setArabic) => {
     const text = (english || "").trim()
-    if (!text || (currentArabic && !wasAuto)) return
+    if (!text || (currentArabic && !wasAuto) || translationDown) return
     setBusy(true); setError("")
     try { setArabic((await clientsApi.translate(text, kind)).data.arabic) }
-    catch (err) { setError(apiErrorMessage(err, "Translation failed. Type the Arabic yourself.")) }
+    catch (err) {
+      if (err.response?.status === 503) translationDown = true
+      setError("Automatic Arabic isn't available right now. Please type it.")
+    }
     finally { setBusy(false) }
   }
   return { busy, error, run }
@@ -175,7 +208,7 @@ function NewClientForm({ noun, onCreated, onCancel }) {
         </Field>
         <Field label={<span className="flex items-center gap-1.5">{label} (Arabic){tr.busy && <Loader2 size={11} className="animate-spin text-blue-500"/>}</span>} required>
           <Input className="input" dir="rtl" rows={multiline ? 2 : undefined} value={f[kAr]}
-            placeholder={tr.busy ? "Translating…" : "Filled in automatically"}
+            placeholder={tr.busy ? "Translating…" : translationDown ? "Type the Arabic" : "Filled in automatically"}
             onChange={e => { set(kAr, e.target.value); setAuto(a => ({ ...a, [autoKey]: false })) }}/>
           {tr.error && <p className="text-xs text-amber-600 mt-1">{tr.error}</p>}
         </Field>
@@ -186,7 +219,7 @@ function NewClientForm({ noun, onCreated, onCancel }) {
   return (
     <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-3">
       <div className="flex items-center gap-2 text-xs text-blue-700">
-        <Languages size={13}/> Type in English. The Arabic fills in when you leave the field, and you can correct it.
+        <Languages size={13}/> {translationDown ? "Type the name and billing address in English and Arabic." : "Type in English. The Arabic fills in when you leave the field, and you can correct it."}
       </div>
       {pair(`${noun} name`, "name_en", "name_ar", "name", nameTr)}
       {pair("Billing address", "billing_address_en", "billing_address_ar", "address", addrTr, true)}
@@ -212,8 +245,8 @@ function scopeLevels(tree, sel, count) {
   let parents = roots.filter(r => sel.has(r.cat_id))
   for (let i = 1; i < count && parents.length; i++) {
     const groups = parents.map(p => ({ parent: p, items: tree.children(p.cat_id) })).filter(g => g.items.length)
-    if (!groups.length) break
-    levels.push({ i, groups })
+    if (!groups.length) { levels.push({ i, groups: [], parents }); break }
+    levels.push({ i, groups, parents })
     parents = groups.flatMap(g => g.items.filter(it => sel.has(it.cat_id)))
   }
   return levels
@@ -247,7 +280,27 @@ function RfpEditor({ module, rfpId }) {
   const [form, setForm] = useState(EMPTY)
   const [stepIdx, setStepIdx] = useState(0)
   const [addingClient, setAddingClient] = useState(false)
+  const [scopeParent, setScopeParent] = useState({})
+  const isAdmin = useAuthStore(st => st.hasRole("ADMIN"))
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const addMember = async (role, field, full_name) => {
+    try {
+      const m = (await api.addTeamMember({ role, full_name })).data
+      await qc.invalidateQueries({ queryKey: ["rfp-team"] })
+      set(field, m.id)
+      toast.success(`${m.name} added`)
+      return true
+    } catch (err) { toast.error(apiErrorMessage(err, "Couldn't add the team member")); return false }
+  }
+  const addScope = async (cat_name, parent_id, levelIdx) => {
+    try {
+      const r = (await api.addScopeOption({ parent_id, cat_name })).data
+      await qc.invalidateQueries({ queryKey: ["rfp-scope", module] })
+      setForm(p => ({ ...p, scope_ids: levelIdx === 0 ? [r.cat_id] : [...p.scope_ids, r.cat_id] }))
+      toast.success(`"${cat_name}" added to the list`)
+      return true
+    } catch (err) { toast.error(apiErrorMessage(err, "Couldn't add the option")); return false }
+  }
 
   useEffect(() => {
     if (!existing) return
@@ -322,7 +375,7 @@ function RfpEditor({ module, rfpId }) {
     return form.bid_bond_required && !form.bid_bond_pct ? ["bid bond percentage"] : []
   }
   function scopeMissing() {
-    return levels.filter(l => !l.groups.some(g => g.items.some(it => sel.has(it.cat_id))))
+    return levels.filter(l => l.groups.length && !l.groups.some(g => g.items.some(it => sel.has(it.cat_id))))
       .map(l => `${mod.scope.levels[l.i].num} ${mod.scope.levels[l.i].name}`)
   }
   function technicalMissing() {
@@ -464,19 +517,32 @@ function RfpEditor({ module, rfpId }) {
     ),
     scope: mod.scope && (
       <div className="space-y-4">
-        {levels.map(({ i, groups }) => {
+        {levels.map(({ i, groups, parents }) => {
           const L = mod.scope.levels[i]
           return (
             <div key={i} className={clsx(i > 0 && "pl-4 border-l-2 border-blue-100")}>
-              <Field label={<><span className="text-blue-600">{L.num}</span> {L.name}</>} required
-                hint={i === 0 ? L.hint : `${L.hint} · you can choose more than one`}>
-                {i === 0 ? (
+              <Field label={<><span className="text-blue-600">{L.num}</span> {L.name}</>} required={groups.length > 0}
+                hint={!groups.length ? null : i === 0 ? L.hint : `${L.hint} · you can choose more than one`}>
+                {!groups.length ? (
+                  <p className="text-sm text-gray-500">Nothing listed under {parents.map(p => p.cat_name).join(", ")} yet{isAdmin ? " — add the first one below, or skip this level." : " — you can skip this level."}</p>
+                ) : i === 0 ? (
                   <select className="input" value={groups[0].items.find(it => sel.has(it.cat_id))?.cat_id || ""} onChange={e => setLevel1(e.target.value)}>
                     <option value="">Choose {L.name.toLowerCase()}…</option>
                     {groups[0].items.map(it => <option key={it.cat_id} value={it.cat_id}>{it.cat_name}</option>)}
                   </select>
                 ) : (
                   <MultiSelect groups={groups} selected={sel} onToggle={toggleScope} placeholder={`Choose ${L.name.toLowerCase()}…`}/>
+                )}
+                {isAdmin && (
+                  <AddInline label={`Add a new ${L.name.toLowerCase()}`} placeholder={L.hint}
+                    onAdd={name => addScope(name, i === 0 ? null : (scopeParent[i] || parents[0].cat_id), i)}>
+                    {i > 0 && parents.length > 1 && (
+                      <select className="input !py-1.5 text-sm w-auto" value={scopeParent[i] || parents[0].cat_id}
+                        onChange={e => setScopeParent(sp => ({ ...sp, [i]: Number(e.target.value) }))}>
+                        {parents.map(p => <option key={p.cat_id} value={p.cat_id}>Under {p.cat_name}</option>)}
+                      </select>
+                    )}
+                  </AddInline>
                 )}
               </Field>
             </div>
@@ -486,10 +552,12 @@ function RfpEditor({ module, rfpId }) {
           <p className="text-sm text-gray-500">The list is empty. Add options in the{" "}
             <Link to={`${mod.path}?tab=scope`} className="text-blue-600 hover:underline">{mod.scope.tab.toLowerCase()}</Link>.</p>
         )}
-        <p className="text-xs text-gray-400">
-          Missing an option? An admin can add it in the{" "}
-          <Link to={`${mod.path}?tab=scope`} className="text-blue-600 hover:underline">{mod.scope.tab.toLowerCase()}</Link>.
-        </p>
+        {!isAdmin && (
+          <p className="text-xs text-gray-400">
+            Missing an option? An admin can add it in the{" "}
+            <Link to={`${mod.path}?tab=scope`} className="text-blue-600 hover:underline">{mod.scope.tab.toLowerCase()}</Link>.
+          </p>
+        )}
       </div>
     ),
     technical: (
@@ -559,25 +627,26 @@ function RfpEditor({ module, rfpId }) {
       <div className="space-y-4">
         {teamEmpty && (
           <div className="alert-info text-xs">
-            No team members are set up yet. Add account managers and bid specialists in{" "}
-            <Link to="/company-settings" className="underline">Company Settings</Link>, and presales staff in{" "}
-            <Link to="/employees" className="underline">Employees</Link>.
+            No team members yet. Use "Add a new …" under each list to add them here; they're saved for every future bid.
           </div>
         )}
         <div className="grid sm:grid-cols-3 gap-4">
           <Field label="Account manager" required>
             <Select value={form.am_id} onChange={v => set("am_id", v)} placeholder="Choose…"
               options={(team?.account_managers || []).map(m => ({ value: m.id, label: m.name }))}/>
+            <AddInline label="Add new" placeholder="Full name" onAdd={name => addMember("account_manager", "am_id", name)}/>
             {mod.telecom && commentBox("am_comment", "AM comment")}
           </Field>
           <Field label="Presales" required>
             <Select value={form.presales_emp_id} onChange={v => set("presales_emp_id", v)} placeholder="Choose…"
               options={(team?.presales || []).map(m => ({ value: m.id, label: m.name }))}/>
+            <AddInline label="Add new" placeholder="Full name" onAdd={name => addMember("presales", "presales_emp_id", name)}/>
             {mod.telecom && commentBox("presales_comment", "Presales comments")}
           </Field>
           <Field label="Bid manager" required>
             <Select value={form.bm_id} onChange={v => set("bm_id", v)} placeholder="Choose…"
               options={(team?.bid_managers || []).map(m => ({ value: m.id, label: m.name }))}/>
+            <AddInline label="Add new" placeholder="Full name" onAdd={name => addMember("bid_manager", "bm_id", name)}/>
             {mod.telecom && commentBox("bid_comment", "Bid comment")}
           </Field>
         </div>

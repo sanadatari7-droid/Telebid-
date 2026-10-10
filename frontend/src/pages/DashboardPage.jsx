@@ -11,6 +11,7 @@ import { fmt } from "../utils/fmt"
 import clsx from "clsx"
 import { useTranslation } from "react-i18next"
 import { useAuthStore } from "../store/authStore"
+import SetupChecklist from "../components/dashboard/SetupChecklist"
 
 const PALETTE = ["#3b82f6","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#ec4899"]
 
@@ -109,6 +110,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-screen-2xl mx-auto">
+      <SetupChecklist/>
       {/* Hero greeting */}
       <div className="relative overflow-hidden rounded-3xl bg-primary-800 px-6 py-7 sm:px-8 sm:py-8 shadow-card-hover animate-fade-in">
         <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-3xl pointer-events-none"/>

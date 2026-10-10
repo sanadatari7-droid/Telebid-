@@ -38,7 +38,12 @@ api.interceptors.response.use(
         window.location.href = "/login"
       }
     }
-    if (err.response?.status !== 401) toast.error(apiErrorMessage(err, "An error occurred"))
+    // The bid modules (and the client form) show their own messages for changes they make,
+    // and translation failures are shown next to the field, so don't pop up a second message.
+    const url = err.config?.url || ""
+    const handledHere = url.includes("/translate/") ||
+      (err.config?.method !== "get" && /^\/(rfps|clients)(\/|$)/.test(url))
+    if (err.response?.status !== 401 && !handledHere) toast.error(apiErrorMessage(err, "An error occurred"))
     return Promise.reject(err)
   }
 )
@@ -410,6 +415,7 @@ export const rfpApi = module => {
     saveChecklist:     (id, d) => api.put(`${base}/${id}/checklist`, d),
     decideTerms:       (id, d) => api.post(`${base}/${id}/checklist/special-terms`, d),
     addPolicy:         label => api.post(`${base}/insurance-policies`, { label }),
+    addTeamMember:     d => api.post(`${base}/team-members`, d),
   }
 }
 
@@ -418,6 +424,7 @@ export const companyConfigApi = {
   get:         () => api.get("/company-config"),
   update:      d => api.patch("/company-config", d),
   getCurrencies: () => api.get("/company-config/currencies"),
+  setupStatus: () => api.get("/company-config/setup-status"),
   getAMs:   () => api.get("/company-config/account-managers"),
   addAM:    d => api.post("/company-config/account-managers", d),
   removeAM: id => api.delete(`/company-config/account-managers/${id}`),

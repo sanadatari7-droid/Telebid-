@@ -247,3 +247,35 @@ async def save_bond_approval(body: BondApprovalUpdate, conn=Depends(get_db), cur
     """, company_id, body.l1_title.strip(), body.l2_title.strip(), body.l3_title.strip(),
         body.office_name.strip(), office_email, body.auto_send)
     return {"message": "Bid bond approval cycle saved"}
+
+
+@router.get("/setup-status")
+async def setup_status(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    """What a new company still has to set up before the bid modules work smoothly (Dashboard checklist)."""
+    company_id = require_company(current_user)
+    one = lambda sql: fetch_one(conn, sql, company_id)
+    co = await one("""SELECT company_initials, country, currency_id, services_ict, services_telecom FROM companies WHERE company_id=$1""")
+    counts = await one("""
+        SELECT (SELECT COUNT(*) FROM company_evaluators WHERE company_id=$1 AND is_active) AS evaluators,
+               (SELECT COUNT(*) FROM company_pricing_approval WHERE company_id=$1) AS pricing,
+               (SELECT COUNT(*) FROM company_bond_approval WHERE company_id=$1 AND COALESCE(office_email,'') <> '') AS bond,
+               (SELECT COUNT(*) FROM company_account_managers WHERE company_id=$1 AND is_active) AS ams,
+               (SELECT COUNT(*) FROM company_bid_managers WHERE company_id=$1 AND is_active) AS bms,
+               (SELECT COUNT(*) FROM employees WHERE company_id=$1 AND is_active AND employee_type='PRESALES') AS presales,
+               (SELECT COUNT(*) FROM rfp_eval_questions WHERE company_id=$1 AND is_active AND module='ICT') AS q_ict,
+               (SELECT COUNT(*) FROM rfp_eval_questions WHERE company_id=$1 AND is_active AND module='TELECOM') AS q_tel,
+               (SELECT COUNT(*) FROM rfp_eval_questions WHERE company_id=$1 AND is_active AND module='EXPRO') AS q_expro""")
+    steps = [
+        ("profile", "Company profile: initials, country, currency and services",
+         bool(co and co["company_initials"] and co["country"] and co["currency_id"] and (co["services_ict"] or co["services_telecom"])),
+         "/company-settings"),
+        ("evaluators", "Add evaluators (name, email, title)", counts["evaluators"] > 0, "/company-settings"),
+        ("pricing", "Set the pricing approval cycle", counts["pricing"] > 0, "/company-settings"),
+        ("bond", "Set the bid bond approval cycle and the issuance office email", counts["bond"] > 0, "/company-settings"),
+        ("team", "Add the team: account managers, bid specialists and presales",
+         counts["ams"] > 0 and counts["bms"] > 0 and counts["presales"] > 0, "/company-settings"),
+        ("q_ict", "RFP ICT: set the evaluation questions", counts["q_ict"] > 0, "/rfp-ict?tab=questions"),
+        ("q_tel", "RFP Telecom: set the evaluation questions", counts["q_tel"] > 0, "/rfp-telecom?tab=questions"),
+        ("q_expro", "EXPRO: set the evaluation questions", counts["q_expro"] > 0, "/expro-requests?tab=questions"),
+    ]
+    return {"steps": [{"id": i, "label": l, "done": d, "link": k} for i, l, d, k in steps]}
