@@ -47,7 +47,7 @@ export default function SignupPage() {
       })
       setAuth(data)
       toast.success(`Welcome to TeleBid, ${data.user?.full_name || data.user?.username}! Your company is ready.`)
-      navigate("/dashboard", { replace: true })
+      navigate("/company-settings", { replace: true })
     } catch (err) {
       setError(apiErrorMessage(err, "Could not create your company. Please try again."))
     } finally {

@@ -66,7 +66,7 @@ export default function LoginPage() {
       } else if (data.access_token) {
         setAuth(data)
         toast.success(`Welcome back, ${data.user?.full_name || data.user?.username}!`)
-        navigate("/dashboard", { replace: true })
+        navigate("/company-settings", { replace: true })
       }
     } catch (err) {
       const msg = err?.response?.data?.detail
@@ -96,7 +96,7 @@ export default function LoginPage() {
       } else if (data.access_token) {
         setAuth(data)
         toast.success(`Welcome back, ${data.user?.full_name || data.user?.username}!`)
-        navigate("/dashboard", { replace: true })
+        navigate("/company-settings", { replace: true })
       }
     } catch (err) {
       const msg = err?.response?.data?.detail
@@ -124,7 +124,7 @@ export default function LoginPage() {
       if (data.access_token) {
         setAuth(data)
         toast.success("Password updated — welcome back!")
-        navigate("/dashboard", { replace: true })
+        navigate("/company-settings", { replace: true })
       }
     } catch (err) {
       const msg = err?.response?.data?.detail

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { companyConfigApi, empApi, oppsV2Api, usersApi } from "../services/api"
 import { COUNTRIES } from "../constants/countries"
+import SetupChecklist from "../components/dashboard/SetupChecklist"
 import { apiErrorMessage } from "../utils/apiError"
 import toast from "react-hot-toast"
 import clsx from "clsx"
@@ -720,6 +721,8 @@ export default function CompanySettingsPage() {
           <p className="page-subtitle">Configure your organisation's application settings</p>
         </div>
       </div>
+
+      <SetupChecklist/>
 
       <div className="flex gap-6">
         <div className="w-72 flex-shrink-0 space-y-5">

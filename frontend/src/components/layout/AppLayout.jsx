@@ -16,12 +16,7 @@ import { useTranslation } from "react-i18next"
 import { setAppLanguage } from "../../i18n"
 
 const NAV_SECTIONS = [
-  {
-    section: null,
-    items: [
-      { label: "Dashboard", tKey: "nav.dashboard", path: "/dashboard",  icon: LayoutDashboard, badge: null },
-    ]
-  },
+  // The Dashboard is no longer in the menu; the app opens on Company Settings. (/dashboard still works.)
   {
     // The four modules, in order. Module 1 (Company) is set up first.
     section: "Modules", sectionTKey: "nav.sectionModules",
@@ -40,8 +35,8 @@ const NAV_SECTIONS = [
     // knowing which one to use. The route itself still exists, unlinked.
     section: "Pipeline", sectionTKey: "nav.sectionPipeline",
     items: [
-      { label: "RFP & Bids",   tKey: "nav.rfpBids",     path: "/rfp-bids",     icon: Briefcase },
-      { label: "All Bids",     tKey: "nav.allBids",     path: "/bids",         icon: FileText },
+      // One list of every bid from RFP ICT and RFP Telecom (replaces "RFP & Bids" and "All Bids").
+      { label: "Bids",         tKey: "nav.bidsMerged",  path: "/all-bids",     icon: Briefcase },
       { label: "EXPRO / Gov",  tKey: "nav.expro",       path: "/expro",        icon: Antenna },
       { label: "ICT Projects", tKey: "nav.ict",         path: "/ict",          icon: Monitor },
       { label: "Bonds",        tKey: "nav.bonds",       path: "/bonds",        icon: Landmark },

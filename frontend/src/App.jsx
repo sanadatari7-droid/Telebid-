@@ -40,6 +40,7 @@ const ContentLibraryPage  = lazy(() => import("./pages/ContentLibraryPage"))
 // Modules 2–4 (RFP ICT, RFP Telecom, EXPRO) share these two pages.
 const RfpListPage         = lazy(() => import("./pages/RfpListPage"))
 const RfpEditorPage       = lazy(() => import("./pages/RfpEditorPage"))
+const AllBidsPage         = lazy(() => import("./pages/AllBidsPage"))
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null } }
@@ -70,7 +71,7 @@ function Guard({ children }) {
 function AdminGuard({ children }) {
   const { isAuthenticated, hasRole } = useAuthStore()
   if (!isAuthenticated) return <Navigate to="/login" replace/>
-  return hasRole("ADMIN") ? children : <Navigate to="/dashboard" replace/>
+  return hasRole("ADMIN") ? children : <Navigate to="/company-settings" replace/>
 }
 function Page({ component: C, ...props }) {
   return <ErrorBoundary><C {...props}/></ErrorBoundary>
@@ -83,7 +84,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage/>}/>
         <Route path="/signup" element={<SignupPage/>}/>
         <Route path="/" element={<Guard><AppLayout/></Guard>}>
-          <Route index element={<Navigate to="/dashboard" replace/>}/>
+          <Route index element={<Navigate to="/company-settings" replace/>}/>
           <Route path="dashboard"     element={<Page component={DashboardPage}/>}/>
           <Route path="register" element={<AdminGuard><Page component={RegisterPage}/></AdminGuard>}/>
           <Route path="bids"          element={<Page component={BidsPage}/>}/>
@@ -122,11 +123,12 @@ export default function App() {
           <Route path="expro-requests"         element={<Page key="expro" component={RfpListPage} module="expro"/>}/>
           <Route path="expro-requests/new"     element={<Page key="expro" component={RfpEditorPage} module="expro"/>}/>
           <Route path="expro-requests/:rfpId"  element={<Page key="expro" component={RfpEditorPage} module="expro"/>}/>
+          <Route path="all-bids"         element={<Page component={AllBidsPage}/>}/>
           <Route path="bonds"            element={<Page component={BondsPage}/>}/>
           <Route path="won-records"      element={<Page component={WonRecordsPage}/>}/>
           <Route path="ai-alerts"        element={<Page component={AiAlertsPage}/>}/>
           <Route path="content-library"  element={<Page component={ContentLibraryPage}/>}/>
-          <Route path="*"             element={<Navigate to="/dashboard" replace/>}/>
+          <Route path="*"             element={<Navigate to="/company-settings" replace/>}/>
         </Route>
       </Routes>
     </Suspense>
