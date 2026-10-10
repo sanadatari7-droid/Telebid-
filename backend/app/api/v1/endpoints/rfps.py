@@ -169,9 +169,9 @@ class ModuleSpec:
 
 
 MODULES = {
-    Module.ict: ModuleSpec("ICT", "RFP", "RFP-ICT", "rfp_ict_number_seq", "ICT", 5,
+    Module.ict: ModuleSpec("ICT", "bid", "BID-ICT", "rfp_ict_number_seq", "ICT", 5,
                            BID_LOG_LISTS, BID_LOG_FIELDS),
-    Module.telecom: ModuleSpec("TELECOM", "RFP", "RFP-TEL", "rfp_telecom_number_seq", "TELECOM", 2,
+    Module.telecom: ModuleSpec("TELECOM", "bid", "BID-TEL", "rfp_telecom_number_seq", "TELECOM", 2,
                                {**BID_LOG_LISTS, **TELECOM_LISTS}, BID_LOG_FIELDS | TELECOM_FIELDS),
     Module.expro: ModuleSpec("EXPRO", "request", "EXPRO", "rfp_expro_number_seq", None, 0,
                              {**TELECOM_LISTS, "phase": "expro_phase", "status": "expro_status", "reason": "expro_reason"},

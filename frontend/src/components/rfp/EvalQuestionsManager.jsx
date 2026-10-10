@@ -58,7 +58,7 @@ export default function EvalQuestionsManager({ module }) {
         <div>
           <div className="section-title flex items-center gap-2"><ClipboardCheck size={13}/> Evaluation questions</div>
           <p className="text-sm text-gray-500 max-w-3xl">
-            Set once by the bid department. Every {mod.expro ? "EXPRO request" : `${mod.title} RFP`} is answered against these
+            Set once by the bid department. Every {mod.expro ? "EXPRO request" : `${mod.title} bid`} is answered against these
             questions; the other modules have their own. Each question has a weight; each answer is worth a share of that
             weight. The {mod.noun}'s score is the total, out of 100%.
           </p>
@@ -71,7 +71,7 @@ export default function EvalQuestionsManager({ module }) {
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
             </div>
           </div>
-          <p className="text-sm text-gray-500 pb-2.5">{mod.expro ? "A request" : "An RFP"} needs at least this score, and the EBITDA minimum from{" "}
+          <p className="text-sm text-gray-500 pb-2.5">{mod.expro ? "A request" : "A bid"} needs at least this score, and the EBITDA minimum from{" "}
             <Link to="/company-settings" className="text-blue-600 hover:underline">Pricing Approval</Link>, to be a <strong className="text-green-700">Go</strong>.</p>
         </div>
         {titles.length === 0 && (
@@ -90,7 +90,7 @@ export default function EvalQuestionsManager({ module }) {
               <div>
                 <label className="label">Question</label>
                 <textarea className="input" rows={2} value={q.question} onChange={e => updateQ(q.key, { question: e.target.value })}
-                  placeholder="e.g. Do we have vendor quotes or partner support for this RFP?"/>
+                  placeholder="e.g. Do we have vendor quotes or partner support for this bid?"/>
               </div>
               <div>
                 <label className="label">Weight</label>

@@ -34,7 +34,7 @@ export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
   const mod = RFP_MODULES[module]
   const api = rfpApi(module)
   const key = ["rfp-bid-bond", module, rfpId]
-  const details = mod.expro ? "the request details" : "RFP details"
+  const details = mod.expro ? "the request details" : "bid details"
   const qc = useQueryClient()
   const { titles, officeName } = useBondApprovalConfig()
   const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => api.bidBond(rfpId).then(r => r.data) })
@@ -64,8 +64,8 @@ export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
   if (isLoading || !data) return <div className="card text-sm text-gray-400">Loading bid bond…</div>
   const { rfp, currency, bond } = data
   // Field 2 is the RFP title; EXPRO requests have none, so their SOW is offered instead.
-  const titleLabel = mod.expro ? "Request title" : "RFP title"
-  const titleSource = rfp.rfp_title ? "From RFP details — edit if the bond needs different wording"
+  const titleLabel = mod.expro ? "Request title" : "Bid title"
+  const titleSource = rfp.rfp_title ? "From the bid details — edit if the bond needs different wording"
     : mod.expro && rfp.sow ? "From the request's SOW — edit if the bond needs different wording"
     : `Not set in ${details} — type it here`
 
@@ -140,7 +140,7 @@ export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
               <div className="text-xs text-gray-500">{pct}% × {formatMoney(value, currency)}</div>
             </div>
           </Row>
-          <Row num="7" label="Reference" source={rfp.company_initials ? `Company initials (${rfp.company_initials}) + ${mod.expro ? "EXPRO number" : "RFP reference"}` : "Add company initials in Company Settings → Company Profile"}>
+          <Row num="7" label="Reference" source={rfp.company_initials ? `Company initials (${rfp.company_initials}) + ${mod.expro ? "EXPRO number" : "bid reference"}` : "Add company initials in Company Settings → Company Profile"}>
             <input className="input font-mono" value={form.bid_ref} onChange={e => set("bid_ref", e.target.value)}/>
           </Row>
           <Row num="8" label="Language of bond">

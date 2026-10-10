@@ -290,7 +290,7 @@ function RfpEditor({ module, rfpId }) {
   const need = (cond, label) => (cond ? [] : [label])
   const moneyNeeded = !isDropped
   const clientStep = {
-    id: "client", num: "1", title: "Client name & billing address", hint: mod.expro ? "The government entity that posted the request." : "Who the RFP is from. Pick from the list, or add a new client once.",
+    id: "client", num: "1", title: "Client name & billing address", hint: mod.expro ? "The government entity that posted the request." : "Who the bid is for. Pick from the list, or add a new client once.",
     missing: () => need(form.client_id, party.toLowerCase()),
   }
   const steps = mod.expro ? [
@@ -304,17 +304,17 @@ function RfpEditor({ module, rfpId }) {
     { id: "value", title: "Pricing & status", hint: "Prices and where the request stands.", missing: () => valueMissing() },
   ] : [
     clientStep,
-    { id: "submission", num: "2", title: "Submission date", hint: "The date the RFP response is due.", missing: () => need(form.submission_date, "submission date") },
+    { id: "submission", num: "2", title: "Submission date", hint: "The date the bid is due.", missing: () => need(form.submission_date, "submission date") },
     { id: "queries", num: "3", title: "Last date for queries", hint: "The last day the client accepts questions. It must be on or before the submission date.",
       missing: () => !form.queries_deadline ? ["last date for queries"]
         : form.submission_date && form.queries_deadline > form.submission_date ? ["a query date on or before the submission date"] : [] },
-    { id: "bond", title: "Bid bond", hint: "Is a bid bond needed for this RFP?", missing: () => bondMissing() },
+    { id: "bond", title: "Bid bond", hint: "Is a bid bond needed for this bid?", missing: () => bondMissing() },
     { id: "scope", num: "4", title: "Scope of work", hint: mod.scope.hint, missing: () => scopeMissing() },
     ...(mod.telecom ? [{ id: "technical", title: "Solution & technical details", hint: "What is being offered.", missing: () => technicalMissing() }] : []),
-    { id: "info", title: "RFP information", hint: "From the bid log: title, reference, channel and type.",
-      missing: () => [...need(has(form.rfp_title), "RFP title"), ...need(form.channel, "channel"),
+    { id: "info", title: "Bid information", hint: "From the bid log: title, reference, channel and type.",
+      missing: () => [...need(has(form.rfp_title), "bid title"), ...need(form.channel, "channel"),
         ...need(form.project_type, "project type"), ...need(has(form.description), "project description")] },
-    { id: "team", title: mod.telecom ? "Team & comments" : "Team", hint: "Who is working on this RFP.", missing: () => teamMissing() },
+    { id: "team", title: mod.telecom ? "Team & comments" : "Team", hint: "Who is working on this bid.", missing: () => teamMissing() },
     { id: "value", title: "Value & status", hint: "The value of the bid and where it stands.", missing: () => valueMissing() },
   ]
   function bondMissing() {
@@ -371,7 +371,7 @@ function RfpEditor({ module, rfpId }) {
     onError: err => toast.error(apiErrorMessage(err, `Couldn't save the ${mod.noun}`)),
   })
 
-  const heading = isNew ? (mod.expro ? "New EXPRO request" : "New RFP")
+  const heading = isNew ? (mod.expro ? "New EXPRO request" : "New Bid")
     : mod.expro && existing ? `EXPRO ${existing.rfp_ref}` : existing?.rfp_number || mod.noun
 
   // ── Step contents ──
@@ -534,15 +534,15 @@ function RfpEditor({ module, rfpId }) {
     ),
     info: (
       <div className="space-y-5">
-        <Field label="RFP title" required hint="Also used as the bid subject on the bid bond">
+        <Field label="Bid title" required hint="Also used as the bid subject on the bid bond">
           <input className="input" value={form.rfp_title} onChange={e => set("rfp_title", e.target.value)}
             placeholder={mod.telecom ? "e.g. Branch connectivity for 20 sites" : "e.g. Hospital campus network refresh"}/>
         </Field>
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="RFP reference" optional hint="The client's own reference, if they gave one">
+          <Field label="Bid reference" optional hint="The client's own reference, if they gave one">
             <input className="input font-mono" value={form.rfp_ref} onChange={e => set("rfp_ref", e.target.value)} placeholder="e.g. SPC-26-0045"/>
           </Field>
-          <Field label="Channel" required hint="How the RFP reached us">
+          <Field label="Channel" required hint="How the bid reached us">
             <Select value={form.channel} onChange={v => set("channel", v)} options={opts("channel")} placeholder="Choose…"/>
           </Field>
         </div>
@@ -614,7 +614,7 @@ function RfpEditor({ module, rfpId }) {
         {mod.bidLog && isLost && (
           <div className="grid sm:grid-cols-2 gap-4 p-4 rounded-xl bg-red-50/60 border border-red-100">
             <Field label="Winner" required>
-              <input className="input" value={form.winner_name} onChange={e => set("winner_name", e.target.value)} placeholder="Who won the RFP"/>
+              <input className="input" value={form.winner_name} onChange={e => set("winner_name", e.target.value)} placeholder="Who won the bid"/>
             </Field>
             <Field label={`Winner's TCV${cur}`} optional>
               <input type="number" min="0" className="input tabular-nums" value={form.winner_tcv} onChange={e => set("winner_tcv", e.target.value)}/>
@@ -642,7 +642,7 @@ function RfpEditor({ module, rfpId }) {
             )}
           </div>
           <div className="flex items-center gap-1 ml-auto bg-gray-100 rounded-xl p-1">
-            {[["details", `${mod.expro ? "Request" : "RFP"} details`], ["evaluation", "A · Evaluation"], ["bond", "B · Bid bond"], ["checklist", "C · Checklist"]].map(([id, lbl]) => (
+            {[["details", `${mod.expro ? "Request" : "Bid"} details`], ["evaluation", "A · Evaluation"], ["bond", "B · Bid bond"], ["checklist", "C · Checklist"]].map(([id, lbl]) => (
               <button key={id} disabled={isNew && id !== "details"} title={isNew && id !== "details" ? `Create the ${mod.noun} first` : undefined}
                 onClick={() => setParams(id === "details" ? {} : { tab: id })}
                 className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed",
@@ -716,7 +716,7 @@ function RfpEditor({ module, rfpId }) {
               {missing.length > 0 && <span className="text-xs text-amber-700 truncate">To continue, fill in: {missing.join(", ")}</span>}
               {isLast ? (
                 <button className="btn-primary whitespace-nowrap" disabled={!allComplete || addingClient || saveMut.isPending} onClick={() => saveMut.mutate()}>
-                  <Check size={14}/> {saveMut.isPending ? "Saving…" : isNew ? `Create ${mod.expro ? "request" : "RFP"}` : "Save changes"}
+                  <Check size={14}/> {saveMut.isPending ? "Saving…" : isNew ? `Create ${mod.expro ? "request" : "bid"}` : "Save changes"}
                 </button>
               ) : (
                 <button className="btn-primary whitespace-nowrap" disabled={missing.length > 0 || addingClient} onClick={goNext}>

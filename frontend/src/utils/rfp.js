@@ -21,13 +21,13 @@ export const TELECOM_SCOPE_LEVELS = [
 export const RFP_MODULES = {
   ict: {
     key: "ict", num: 2, path: "/rfp-ict", title: "RFP ICT", subtitle: "Module 2 · ICT requests for proposal",
-    noun: "RFP", nouns: "RFPs", bidLog: true,
+    noun: "bid", nouns: "bids", bidLog: true,
     scope: { levels: ICT_SCOPE_LEVELS, tab: "Scope of work list", first: "scope (4.1), e.g. Infrastructure",
              hint: "Start with the main scope, then narrow it down. From 4.2 on you can pick several." },
   },
   telecom: {
     key: "telecom", num: 3, path: "/rfp-telecom", title: "RFP Telecom", subtitle: "Module 3 · Telecom requests for proposal",
-    noun: "RFP", nouns: "RFPs", bidLog: true, telecom: true,
+    noun: "bid", nouns: "bids", bidLog: true, telecom: true,
     scope: { levels: TELECOM_SCOPE_LEVELS, tab: "Family & solution list", first: "family (4.1), e.g. Connectivity",
              hint: "Choose the family, then one or more solutions under it." },
   },

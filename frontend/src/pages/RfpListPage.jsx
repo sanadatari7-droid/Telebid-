@@ -83,7 +83,7 @@ function ScopeListManager({ mod }) {
         <div>
           <div className="section-title flex items-center gap-2"><ListTree size={13}/> {mod.scope.tab}</div>
           <p className="text-sm text-gray-500">
-            The choices offered in field 4 of every RFP. Each item can have items under it, {levels.length} levels deep.
+            The choices offered in field 4 of every bid. Each item can have items under it, {levels.length} levels deep.
           </p>
         </div>
         <div>{tree.children(null).map(n => <ScopeNode key={n.cat_id} node={n} tree={tree} levels={levels} onAdd={onAdd} onRemove={onRemove}/>)}</div>
@@ -116,7 +116,7 @@ export default function RfpListPage({ module }) {
   const { i18n } = useTranslation()
   const lang = i18n.language
   const [params, setParams] = useSearchParams()
-  const tabs = [["rfps", mod.expro ? "Requests" : "RFPs"], ...(mod.scope ? [["scope", mod.scope.tab]] : []), ["questions", "Evaluation questions"]]
+  const tabs = [["rfps", mod.expro ? "Requests" : "Bids"], ...(mod.scope ? [["scope", mod.scope.tab]] : []), ["questions", "Evaluation questions"]]
   const tab = tabs.some(([id]) => id === params.get("tab")) ? params.get("tab") : "rfps"
   const [q, setQ] = useState("")
   const [filter, setFilter] = useState("all")
@@ -128,7 +128,7 @@ export default function RfpListPage({ module }) {
 
   const deleteMut = useMutation({
     mutationFn: id => api.delete(id),
-    onSuccess: () => { toast.success(`${mod.expro ? "Request" : "RFP"} deleted`); qc.invalidateQueries({ queryKey: ["rfps", module] }) },
+    onSuccess: () => { toast.success(`${mod.expro ? "Request" : "Bid"} deleted`); qc.invalidateQueries({ queryKey: ["rfps", module] }) },
     onError: err => toast.error(apiErrorMessage(err, `Couldn't delete the ${mod.noun}`)),
   })
 
@@ -143,7 +143,7 @@ export default function RfpListPage({ module }) {
   const money = v => formatMoney(v, { decimals: currency?.decimals })
   const headers = mod.expro
     ? ["EXPRO no.", "Entity", "Submission", "SOW", "Bond", "AM", `NRC / MRC${cur}`, "Go / No-Go", "Status", ""]
-    : ["RFP", "Client", "Submission", "Bond", mod.telecom ? "Solution" : "Scope", "AM", `${mod.telecom ? "TCV / MRC" : "TCV"}${cur}`, "Go / No-Go", "Status", ""]
+    : ["Bid", "Client", "Submission", "Bond", mod.telecom ? "Solution" : "Scope", "AM", `${mod.telecom ? "TCV / MRC" : "TCV"}${cur}`, "Go / No-Go", "Status", ""]
 
   return (
     <div className="p-6 max-w-screen-xl mx-auto space-y-5">
@@ -152,7 +152,7 @@ export default function RfpListPage({ module }) {
           <h1 className="page-title">{mod.title}</h1>
           <p className="page-subtitle">{mod.subtitle}</p>
         </div>
-        {tab === "rfps" && <button className="btn-primary" onClick={() => navigate(`${mod.path}/new`)}><Plus size={14}/> New {mod.expro ? "request" : "RFP"}</button>}
+        {tab === "rfps" && <button className="btn-primary" onClick={() => navigate(`${mod.path}/new`)}><Plus size={14}/> New {mod.expro ? "request" : "Bid"}</button>}
       </div>
 
       <div className="flex gap-1 border-b border-gray-200">
@@ -171,7 +171,7 @@ export default function RfpListPage({ module }) {
             <div className="relative flex-1 min-w-[220px] max-w-sm">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
               <input className="input pl-9" value={q} onChange={e => setQ(e.target.value)}
-                placeholder={mod.expro ? "Search entity, EXPRO number or SOW" : "Search client, title, RFP number or reference"}/>
+                placeholder={mod.expro ? "Search entity, EXPRO number or SOW" : "Search client, title, bid number or reference"}/>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {STATUS_FILTERS.map(f => (
@@ -201,7 +201,7 @@ export default function RfpListPage({ module }) {
                         <p className="text-sm text-gray-400">
                           {rfps.length ? `No ${mod.nouns} match this search.`
                             : mod.expro ? "No EXPRO requests yet. Use \"New request\" to add the first one."
-                            : `No ${mod.title} RFPs yet. Use "New RFP" to add the first one.`}
+                            : `No ${mod.title} bids yet. Use "New Bid" to add the first one.`}
                         </p>
                       </div>
                     </td></tr>
