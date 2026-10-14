@@ -16,7 +16,7 @@ const SECTION_GROUPS = [
   { title: "Module 1 · Company", sections: [
     { id:"1", num:"A", label:"Company Profile",            icon:Building2 },
     { id:"B", num:"B", label:"Evaluators",                 icon:UserCheck },
-    { id:"C", num:"C", label:"Pricing Approval Cycle",     icon:TrendingUp },
+    { id:"C", num:"C", label:"Approvals",                  icon:TrendingUp },
     { id:"D", num:"D", label:"Bid Bond Approval Cycle",    icon:Shield },
   ]},
   { title: "Other settings", sections: [
@@ -375,7 +375,7 @@ function PeopleSection({ type }) {
 
 // ── Section B: Evaluators (Module 1 / Sub-module B) ──────────────────────────
 // Repeatable Name / Email / Title records. Title is later selectable in
-// Module 2 (RFP ICT)'s evaluation process.
+// Module 2 (Bid ICT)'s evaluation process.
 function EvaluatorsSection() {
   const qc = useQueryClient()
   const { data: items = [] } = useQuery({
@@ -408,7 +408,7 @@ function EvaluatorsSection() {
         </button>
       </div>
       <div className="alert-info text-xs">
-        Each evaluator's Title is selectable later in Module 2 (RFP ICT)'s evaluation process.
+        Each evaluator's Title is selectable later in Module 2 (Bid ICT)'s evaluation process.
       </div>
 
       {showAdd && (
@@ -452,10 +452,11 @@ function EvaluatorsSection() {
   )
 }
 
-// ── Section C: Pricing Approval Cycle (Module 1 / Sub-module C) ──────────────
-// L1 → L2 → L3. Telecom escalates on discount %, ICT on margin %.
-// Go / No-Go business case gate is a minimum EBITDA %.
-const PCT_FIELDS = ["telecom_l1_max_discount","telecom_l2_max_discount","ict_l1_min_margin","ict_l2_min_margin","ebitda_min_pct"]
+// ── Section C: Approvals (Module 1 / Sub-module C) ───────────────────────────
+// Pricing goes straight to the VP Sales; above the VP's limit, a higher level approves too.
+// Special terms and conditions go to Contracting by email. Plus the Go / No-Go EBITDA minimum.
+const PCT_FIELDS = ["telecom_l1_max_discount","ict_l1_min_margin","ebitda_min_pct"]
+const TEXT_FIELDS = ["l1_title","l1_name","l1_email","l2_title","l2_name","l2_email","contracting_name","contracting_email"]
 
 function PctInput({ value, onChange, min = 0 }) {
   return (
@@ -467,14 +468,27 @@ function PctInput({ value, onChange, min = 0 }) {
   )
 }
 
-function RuleRow({ level, title, children }) {
+function Approver({ badge, form, set, prefix, titleLabel, hint, required }) {
   return (
-    <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="badge-blue flex-shrink-0">{level}</span>
-        <span className="text-sm font-semibold text-gray-900 truncate">{title}</span>
+    <div className="p-4 rounded-xl border border-gray-200 bg-white space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="badge-blue">{badge}</span>
+        <span className="text-xs text-gray-500">{hint}</span>
       </div>
-      <div className="flex items-center gap-2 text-sm text-gray-500 flex-shrink-0">{children}</div>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <div>
+          <label className="label">{titleLabel}</label>
+          <input className="input" value={form[`${prefix}_title`] || ""} onChange={e => set(`${prefix}_title`, e.target.value)}/>
+        </div>
+        <div>
+          <label className="label">Name</label>
+          <input className="input" value={form[`${prefix}_name`] || ""} onChange={e => set(`${prefix}_name`, e.target.value)} placeholder="e.g. Khalid Al-Harbi"/>
+        </div>
+        <div>
+          <label className="label">Email {required && <span className="text-red-500">*</span>}</label>
+          <input type="email" className="input" value={form[`${prefix}_email`] || ""} onChange={e => set(`${prefix}_email`, e.target.value)} placeholder="name@company.com"/>
+        </div>
+      </div>
     </div>
   )
 }
@@ -489,12 +503,16 @@ function PricingApprovalSection() {
 
   const saveMut = useMutation({
     mutationFn: () => {
-      const payload = { l1_title: form.l1_title, l2_title: form.l2_title, l3_title: form.l3_title }
+      const payload = {}
+      TEXT_FIELDS.forEach(k => { payload[k] = (form[k] || "").trim() || null })
+      payload.l1_title = payload.l1_title || "VP Sales"
+      payload.l2_title = payload.l2_title || "Higher management"
+      payload.contracting_name = payload.contracting_name || "Contracting"
       PCT_FIELDS.forEach(k => { payload[k] = form[k] === "" || form[k] == null ? null : Number(form[k]) })
       return companyConfigApi.savePricingApproval(payload)
     },
-    onSuccess: () => { toast.success("Pricing approval cycle saved"); qc.invalidateQueries({queryKey:["pricing-approval"]}) },
-    onError: err => toast.error(apiErrorMessage(err, "Failed to save pricing approval cycle"))
+    onSuccess: () => { toast.success("Approvals saved"); qc.invalidateQueries({queryKey:["pricing-approval"]}); qc.invalidateQueries({queryKey:["setup-status"]}) },
+    onError: err => toast.error(apiErrorMessage(err, "Failed to save the approvals"))
   })
 
   if (!form) return null
@@ -503,71 +521,77 @@ function PricingApprovalSection() {
   const noneSet = !company?.services_ict && !company?.services_telecom
   const showTelecom = noneSet || company?.services_telecom
   const showIct = noneSet || company?.services_ict
-  const titles = [form.l1_title, form.l2_title, form.l3_title]
+  const vp = form.l1_title || "VP Sales"
 
   return (
     <div className="space-y-6">
       <div className="card space-y-4">
-        <div className="section-title flex items-center gap-2"><TrendingUp size={13}/> C — Pricing Approval Cycle</div>
+        <div className="section-title flex items-center gap-2"><TrendingUp size={13}/> C — Approvals · Pricing</div>
         <div className="alert-info text-xs">
-          Pricing is approved in sequence. Each level's title can be renamed to match your organisation. It is used on every bid's "D · Pricing" tab: the margin (ICT) or discount (Telecom, EXPRO) decides how far up the levels the pricing has to go.
+          Pricing goes straight to the {vp}. If it is beyond the {vp}'s limit, the {vp} gets approval from a higher level as well.
+          The person whose turn it is gets an email; they approve on the bid's "D · Pricing" tab.
         </div>
-        <div className="flex items-stretch gap-2">
-          {["l1_title","l2_title","l3_title"].map((k, i) => (
-            <React.Fragment key={k}>
-              {i > 0 && <ChevronRight size={16} className="text-gray-300 self-center flex-shrink-0"/>}
-              <div className="flex-1 p-3 rounded-xl border border-gray-200 bg-white">
-                <div className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Level {i+1}</div>
-                <input className="input" value={form[k] || ""} onChange={e => set(k, e.target.value)}/>
-              </div>
-            </React.Fragment>
-          ))}
-        </div>
+        <Approver badge="1" form={form} set={set} prefix="l1" titleLabel="Title" required
+          hint="Approves every pricing first"/>
+        <div className="flex items-center gap-2 text-xs text-gray-400 pl-2"><ChevronRight size={14}/> only if above the {vp}'s limit</div>
+        <Approver badge="2" form={form} set={set} prefix="l2" titleLabel="Title"
+          hint={`Higher level the ${vp} goes to`}/>
       </div>
 
-      {showTelecom && (
-        <div className="card space-y-3">
-          <div className="section-title">Telecom — approval by discount %</div>
-          <RuleRow level="L1" title={titles[0]}>
-            approves discounts up to <PctInput value={form.telecom_l1_max_discount} onChange={v => set("telecom_l1_max_discount", v)}/>
-          </RuleRow>
-          <RuleRow level="L2" title={titles[1]}>
-            approves discounts up to <PctInput value={form.telecom_l2_max_discount} onChange={v => set("telecom_l2_max_discount", v)}/>
-          </RuleRow>
-          <RuleRow level="L3" title={titles[2]}>
-            approves any discount above {form.telecom_l2_max_discount !== "" && form.telecom_l2_max_discount != null ? `${form.telecom_l2_max_discount}%` : "Level 2's limit"}
-          </RuleRow>
-        </div>
-      )}
+      <div className="card space-y-3">
+        <div className="section-title">The {vp}'s limit</div>
+        {showTelecom && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
+            <div>
+              <div className="text-sm font-semibold text-gray-900">Telecom &amp; EXPRO — by discount</div>
+              <div className="text-xs text-gray-400">The {vp} alone approves discounts up to this. Above it, the higher level approves too.</div>
+            </div>
+            <PctInput value={form.telecom_l1_max_discount} onChange={v => set("telecom_l1_max_discount", v)}/>
+          </div>
+        )}
+        {showIct && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
+            <div>
+              <div className="text-sm font-semibold text-gray-900">ICT — by margin</div>
+              <div className="text-xs text-gray-400">The {vp} alone approves margins of at least this. Below it, the higher level approves too.</div>
+            </div>
+            <PctInput value={form.ict_l1_min_margin} onChange={v => set("ict_l1_min_margin", v)}/>
+          </div>
+        )}
+        <p className="text-xs text-gray-400">Leave a limit empty and the {vp} approves any figure.</p>
+      </div>
 
-      {showIct && (
-        <div className="card space-y-3">
-          <div className="section-title">ICT — approval by margin %</div>
-          <RuleRow level="L1" title={titles[0]}>
-            approves margins of at least <PctInput value={form.ict_l1_min_margin} onChange={v => set("ict_l1_min_margin", v)}/>
-          </RuleRow>
-          <RuleRow level="L2" title={titles[1]}>
-            approves margins of at least <PctInput value={form.ict_l2_min_margin} onChange={v => set("ict_l2_min_margin", v)}/>
-          </RuleRow>
-          <RuleRow level="L3" title={titles[2]}>
-            approves any margin below {form.ict_l2_min_margin !== "" && form.ict_l2_min_margin != null ? `${form.ict_l2_min_margin}%` : "Level 2's limit"}
-          </RuleRow>
+      <div className="card space-y-4">
+        <div className="section-title flex items-center gap-2"><Send size={13}/> Special terms &amp; conditions — Contracting</div>
+        <div className="alert-info text-xs">
+          On a bid's "C · Checklist" tab, the bid manager attaches the documents and sends the special terms to Contracting by email, then records their answer.
         </div>
-      )}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Department name</label>
+            <input className="input" value={form.contracting_name || ""} onChange={e => set("contracting_name", e.target.value)}/>
+          </div>
+          <div>
+            <label className="label">Email <span className="text-red-500">*</span></label>
+            <input type="email" className="input" value={form.contracting_email || ""} onChange={e => set("contracting_email", e.target.value)} placeholder="contracting@company.com"/>
+            <p className="form-hint">Several addresses? Separate them with commas.</p>
+          </div>
+        </div>
+      </div>
 
       <div className="card space-y-3">
         <div className="section-title">Business case — Go / No-Go</div>
         <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
           <div>
             <div className="text-sm font-semibold text-gray-900">Minimum EBITDA margin to Go</div>
-            <div className="text-xs text-gray-400">Earnings Before Interest, Taxes, Depreciation &amp; Amortization, as a % of revenue. Below this is a No-Go.</div>
+            <div className="text-xs text-gray-400">Earnings Before Interest, Taxes, Depreciation &amp; Amortization, as a % of revenue. Below this is a No-Go, and pricing also needs the higher level.</div>
           </div>
           <PctInput value={form.ebitda_min_pct} onChange={v => set("ebitda_min_pct", v)} min={-100}/>
         </div>
       </div>
 
       <button className="btn-primary" disabled={saveMut.isPending} onClick={() => saveMut.mutate()}>
-        <Check size={13}/> {saveMut.isPending ? "Saving…" : "Save Pricing Approval Cycle"}
+        <Check size={13}/> {saveMut.isPending ? "Saving…" : "Save approvals"}
       </button>
     </div>
   )

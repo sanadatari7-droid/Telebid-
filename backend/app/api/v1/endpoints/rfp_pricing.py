@@ -1,14 +1,15 @@
-"""Sub-module D of Modules 2–4 (after C, the checklist) — pricing approval for a bid.
+"""Sub-module D of Modules 2–4 — pricing approval for a bid.
 
-Uses the Pricing Approval Cycle set in Module 1 / Sub-module C:
-- ICT bids are judged on margin: cost and selling price give the margin %.
-  Level 1 approves margins of at least its minimum, Level 2 at least its minimum, Level 3 anything lower.
-- Telecom bids and EXPRO requests are judged on discount: list price and offered price give the discount %.
-  Level 1 approves discounts up to its maximum, Level 2 up to its maximum, Level 3 anything higher.
-- An EBITDA below the company minimum always goes up to Level 3.
-The approvals run in order (L1, then L2, …) up to the level the figures need. Any approver may
-send the pricing back; changing the figures restarts the cycle. The bid manager is told the outcome.
+How the business runs it (Module 1 / C, "Approvals"):
+- Pricing goes straight to the VP Sales (Level 1), the person assigned in Company Settings.
+- If the figures are beyond the VP's limit, the VP gets approval from a higher level (Level 2).
+  ICT is judged on margin (cost vs selling price): the VP approves margins of at least the limit.
+  Telecom and EXPRO are judged on discount (list vs offered price): the VP approves discounts up to the limit.
+  An EBITDA below the company minimum also needs the higher level.
+- The approver whose turn it is gets an email. Any approver may send the pricing back with a reason;
+  changing the figures restarts the cycle. The bid manager is told the outcome.
 """
+import html
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
@@ -17,12 +18,14 @@ from pydantic import BaseModel, Field
 
 from app.db.postgres import get_db, fetch_one, execute, require_company
 from app.middleware.auth import get_current_user
-from app.api.v1.endpoints.company_config import PRICING_DEFAULTS
+from app.api.v1.endpoints.company_config import get_pricing_config
 from app.api.v1.endpoints.rfps import Module, require_rfp
 from app.api.v1.endpoints.rfp_checklist import _tell_bid_manager
+from app.services.email_service import send_email, smtp_configured
 
 router = APIRouter(prefix="/rfps", tags=["RFP pricing approval"])
 
+# Besides the person assigned to a level (matched by email), these roles may approve.
 APPROVER_ROLES = ("ADMIN", "DEPT_MANAGER", "DIRECTOR")
 FIGURES = ("cost", "price", "list_price", "ebitda_pct")
 
@@ -36,7 +39,7 @@ class PricingIn(BaseModel):
 
 
 class ApproveIn(BaseModel):
-    level: int = Field(..., ge=1, le=3)
+    level: int = Field(..., ge=1, le=2)
 
 
 class SendBackIn(BaseModel):
@@ -47,55 +50,81 @@ def _basis(module: Module) -> str:
     return "MARGIN" if module == Module.ict else "DISCOUNT"
 
 
-def _pct(x: Decimal) -> Decimal:
-    return x.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
 def _num(v) -> Optional[Decimal]:
     return None if v is None else Decimal(str(v))
 
 
 def assess(basis: str, cost, price, list_price, ebitda, cfg: dict) -> dict:
-    """Works out the margin or discount and the approval level it needs, with the reasons."""
+    """The margin or discount, and whether the VP alone (1) or the higher level too (2) must approve."""
     price, cost, list_price, ebitda = _num(price), _num(cost), _num(list_price), _num(ebitda)
-    reasons = []
+    vp = cfg["l1_title"]
     if basis == "MARGIN":
-        pct = _pct((price - cost) / price * 100)
-        l1, l2 = _num(cfg.get("ict_l1_min_margin")), _num(cfg.get("ict_l2_min_margin"))
-        if l1 is not None and pct >= l1:
-            level = 1; reasons.append(f"Margin {pct}% is at least Level 1's minimum of {l1}%")
-        elif l2 is not None and pct >= l2:
-            level = 2; reasons.append(f"Margin {pct}% is below Level 1's minimum" + (f" of {l1}%" if l1 is not None else "")
-                                      + f" but at least Level 2's minimum of {l2}%")
-        else:
-            level = 3; reasons.append(f"Margin {pct}% is below Level 2's minimum" + (f" of {l2}%" if l2 is not None else " (not set)"))
+        pct = ((price - cost) / price * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        limit = _num(cfg.get("ict_l1_min_margin"))
+        within = limit is None or pct >= limit
+        reason = (f"Margin {pct}% — no limit is set, so the {vp} approves" if limit is None
+                  else f"Margin {pct}% is at least the {vp}'s minimum of {limit}%" if within
+                  else f"Margin {pct}% is below the {vp}'s minimum of {limit}%")
     else:
-        pct = _pct((list_price - price) / list_price * 100)
-        l1, l2 = _num(cfg.get("telecom_l1_max_discount")), _num(cfg.get("telecom_l2_max_discount"))
-        if l1 is not None and pct <= l1:
-            level = 1; reasons.append(f"Discount {pct}% is within Level 1's limit of {l1}%")
-        elif l2 is not None and pct <= l2:
-            level = 2; reasons.append(f"Discount {pct}% is above Level 1's limit" + (f" of {l1}%" if l1 is not None else "")
-                                      + f" but within Level 2's limit of {l2}%")
-        else:
-            level = 3; reasons.append(f"Discount {pct}% is above Level 2's limit" + (f" of {l2}%" if l2 is not None else " (not set)"))
+        pct = ((list_price - price) / list_price * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        limit = _num(cfg.get("telecom_l1_max_discount"))
+        within = limit is None or pct <= limit
+        reason = (f"Discount {pct}% — no limit is set, so the {vp} approves" if limit is None
+                  else f"Discount {pct}% is within the {vp}'s limit of {limit}%" if within
+                  else f"Discount {pct}% is above the {vp}'s limit of {limit}%")
+    reasons = [reason]
+    level = 1 if within else 2
     emin = _num(cfg.get("ebitda_min_pct"))
     if emin is not None and ebitda is not None and ebitda < emin:
-        level = 3; reasons.append(f"EBITDA {ebitda}% is below the company minimum of {emin}%, so Level 3 must approve")
+        level = 2; reasons.append(f"EBITDA {ebitda}% is below the company minimum of {emin}%")
+    if level == 2:
+        reasons.append(f"The {vp} approves first, then gets approval from {cfg['l2_title']}")
     return {"pct": pct, "required_level": level, "reasons": reasons}
 
 
-async def _config(conn, company_id: int) -> dict:
-    row = await fetch_one(conn, "SELECT * FROM company_pricing_approval WHERE company_id=$1", company_id)
-    return dict(row) if row else {"company_id": company_id, **PRICING_DEFAULTS}
+def _assigned(cfg: dict, level: int, email: Optional[str]) -> bool:
+    listed = cfg.get(f"l{level}_email") or ""
+    return bool(email) and email.strip().lower() in [e.strip().lower() for e in listed.split(",") if e.strip()]
+
+
+def _may_approve(cfg: dict, level: int, current_user) -> bool:
+    return current_user.has_role(*APPROVER_ROLES) or _assigned(cfg, level, current_user.email)
+
+
+async def _email_approver(conn, rfp_id: int, company_id: int, cfg: dict, level: int):
+    """Tell the person assigned to this level that the pricing is waiting for them."""
+    to = cfg.get(f"l{level}_email")
+    if not to or not await smtp_configured(company_id):
+        return
+    p = await fetch_one(conn, """
+        SELECT r.rfp_number, r.rfp_title, r.sow, c.name_en, pr.basis, pr.pct, pr.price, pr.cost, pr.list_price,
+               pr.ebitda_pct, pr.notes, pr.submitted_by_name, cur.currency_code
+        FROM rfps r JOIN clients c ON c.client_id = r.client_id JOIN rfp_pricing pr ON pr.rfp_id = r.rfp_id
+        JOIN companies co ON co.company_id = r.company_id LEFT JOIN currencies cur ON cur.currency_id = co.currency_id
+        WHERE r.rfp_id=$1""", rfp_id)
+    cur = p["currency_code"] or ""
+    money = lambda v: f"{cur} {Decimal(v):,.2f}".strip()
+    lines = [f"Pricing for {p['rfp_number']} — {p['name_en']}" + (f" — {p['rfp_title'] or p['sow']}" if (p['rfp_title'] or p['sow']) else ""),
+             f"Submitted by {p['submitted_by_name']}"]
+    if p["basis"] == "MARGIN":
+        lines += [f"Cost: {money(p['cost'])}", f"Selling price: {money(p['price'])}", f"Margin: {p['pct']}%"]
+    else:
+        lines += [f"List price: {money(p['list_price'])}", f"Offered price: {money(p['price'])}", f"Discount: {p['pct']}%"]
+    if p["ebitda_pct"] is not None:
+        lines.append(f"EBITDA: {p['ebitda_pct']}%")
+    if p["notes"]:
+        lines.append(f"Notes: {p['notes']}")
+    lines.append(f"Please review and approve it in TeleBid (bid {p['rfp_number']}, tab D · Pricing).")
+    subject = f"{p['rfp_number']}: pricing waiting for your approval ({cfg[f'l{level}_title']})"
+    await send_email(to, subject, "".join(f"<p>{html.escape(l)}</p>" for l in lines), "\n".join(lines), company_id)
 
 
 async def _payload(conn, module: Module, rfp_id: int, current_user) -> dict:
     company_id = require_company(current_user)
     await require_rfp(conn, module, rfp_id, company_id)
-    cfg = await _config(conn, company_id)
+    cfg = await get_pricing_config(conn, company_id)
     rfp = await fetch_one(conn, """
-        SELECT r.tcv, r.nrc, r.mrc, e.ebitda_pct AS eval_ebitda, cur.currency_code, COALESCE(co.currency_decimals, 2) AS decimals
+        SELECT r.tcv, e.ebitda_pct AS eval_ebitda, cur.currency_code, COALESCE(co.currency_decimals, 2) AS decimals
         FROM rfps r JOIN companies co ON co.company_id = r.company_id
         LEFT JOIN currencies cur ON cur.currency_id = co.currency_id
         LEFT JOIN rfp_evaluations e ON e.rfp_id = r.rfp_id
@@ -103,10 +132,11 @@ async def _payload(conn, module: Module, rfp_id: int, current_user) -> dict:
     return {
         "basis": _basis(module),
         "pricing": await fetch_one(conn, "SELECT * FROM rfp_pricing WHERE rfp_id=$1", rfp_id),
-        "config": {k: cfg.get(k) for k in PRICING_DEFAULTS},
+        "config": {k: cfg[k] for k in ("l1_title", "l1_name", "l1_email", "l2_title", "l2_name", "l2_email",
+                                        "telecom_l1_max_discount", "ict_l1_min_margin", "ebitda_min_pct")},
         "defaults": {"price": rfp["tcv"], "ebitda_pct": rfp["eval_ebitda"]},
         "currency": {"code": rfp["currency_code"], "decimals": rfp["decimals"]},
-        "can_approve": current_user.has_role(*APPROVER_ROLES),
+        "can_approve": [_may_approve(cfg, 1, current_user), _may_approve(cfg, 2, current_user)],
     }
 
 
@@ -119,13 +149,12 @@ async def get_pricing(module: Module, rfp_id: int, conn=Depends(get_db), current
 async def save_pricing(module: Module, rfp_id: int, body: PricingIn, conn=Depends(get_db),
                        current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
-    spec = await require_rfp(conn, module, rfp_id, company_id)
+    await require_rfp(conn, module, rfp_id, company_id)
     basis = _basis(module)
     if basis == "MARGIN":
         if body.cost is None:
             raise HTTPException(status_code=400, detail="Enter the total cost")
-        list_price = None
-        cost = body.cost
+        list_price, cost = None, body.cost
     else:
         if body.list_price is None:
             raise HTTPException(status_code=400, detail="Enter the list price (the price before discount)")
@@ -133,7 +162,7 @@ async def save_pricing(module: Module, rfp_id: int, body: PricingIn, conn=Depend
             raise HTTPException(status_code=400, detail="The offered price can't be more than the list price")
         list_price, cost = body.list_price, None
 
-    cfg = await _config(conn, company_id)
+    cfg = await get_pricing_config(conn, company_id)
     result = assess(basis, cost, body.price, list_price, body.ebitda_pct, cfg)
     notes = (body.notes or "").strip() or None
     old = await fetch_one(conn, "SELECT * FROM rfp_pricing WHERE rfp_id=$1", rfp_id)
@@ -142,14 +171,11 @@ async def save_pricing(module: Module, rfp_id: int, body: PricingIn, conn=Depend
     changed = not old or old["status"] == "SENT_BACK" or any(_num(old[k]) != _num(new[k]) for k in FIGURES)
 
     if changed:
-        # New or different figures: the cycle starts again from Level 1.
+        # New or different figures: the cycle starts again from the VP Sales.
         await execute(conn, """
             INSERT INTO rfp_pricing (rfp_id, basis, cost, price, list_price, ebitda_pct, pct, required_level, notes,
-                   status, approval_level, l1_approved_by, l1_approver_name, l1_approved_at,
-                   l2_approved_by, l2_approver_name, l2_approved_at, l3_approved_by, l3_approver_name, l3_approved_at,
-                   sent_back_by_name, sent_back_at, sent_back_note, submitted_by, submitted_by_name, submitted_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
-                    NULL,NULL,NULL,$10,$11,NOW(),NOW())
+                   status, approval_level, submitted_by, submitted_by_name, submitted_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',0,$10,$11,NOW(),NOW())
             ON CONFLICT (rfp_id) DO UPDATE SET basis=EXCLUDED.basis, cost=EXCLUDED.cost, price=EXCLUDED.price,
                 list_price=EXCLUDED.list_price, ebitda_pct=EXCLUDED.ebitda_pct, pct=EXCLUDED.pct,
                 required_level=EXCLUDED.required_level, notes=EXCLUDED.notes, status='PENDING', approval_level=0,
@@ -161,10 +187,11 @@ async def save_pricing(module: Module, rfp_id: int, body: PricingIn, conn=Depend
                 submitted_at=NOW(), updated_at=NOW()""",
             rfp_id, basis, cost, body.price, list_price, body.ebitda_pct, result["pct"], result["required_level"],
             notes, current_user.user_id, current_user.full_name)
+        await _email_approver(conn, rfp_id, company_id, cfg, 1)
         label = "margin" if basis == "MARGIN" else "discount"
         await _tell_bid_manager(conn, rfp_id, company_id, "pricing waiting for approval",
-            [f"{current_user.full_name} submitted pricing for approval: {label} {result['pct']}%.",
-             *result["reasons"], f"It needs approval up to Level {result['required_level']}."], "RFP_PRICING")
+            [f"{current_user.full_name} submitted pricing for approval: {label} {result['pct']}%.", *result["reasons"]],
+            "RFP_PRICING")
     else:
         await execute(conn, "UPDATE rfp_pricing SET notes=$2, updated_at=NOW() WHERE rfp_id=$1", rfp_id, notes)
     return await _payload(conn, module, rfp_id, current_user)
@@ -175,14 +202,15 @@ async def approve_pricing(module: Module, rfp_id: int, body: ApproveIn, conn=Dep
                           current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
     await require_rfp(conn, module, rfp_id, company_id)
-    if not current_user.has_role(*APPROVER_ROLES):
-        raise HTTPException(status_code=403, detail="You aren't one of the pricing approvers")
+    cfg = await get_pricing_config(conn, company_id)
+    lvl = body.level
+    if not _may_approve(cfg, lvl, current_user):
+        raise HTTPException(status_code=403, detail=f"Only the {cfg[f'l{lvl}_title']} can approve this step")
     row = await fetch_one(conn, "SELECT * FROM rfp_pricing WHERE rfp_id=$1", rfp_id)
     if not row:
         raise HTTPException(status_code=400, detail="No pricing has been submitted yet")
-    lvl = body.level
     if row["status"] != "PENDING" or row["approval_level"] != lvl - 1 or lvl > row["required_level"]:
-        raise HTTPException(status_code=400, detail=f"This pricing isn't waiting for Level {lvl} approval")
+        raise HTTPException(status_code=400, detail=f"This pricing isn't waiting for {cfg[f'l{lvl}_title']} approval")
     done = lvl == row["required_level"]
     result = await execute(conn, f"""
         UPDATE rfp_pricing SET approval_level=$2, l{lvl}_approved_by=$3, l{lvl}_approver_name=$4, l{lvl}_approved_at=NOW(),
@@ -192,11 +220,12 @@ async def approve_pricing(module: Module, rfp_id: int, body: ApproveIn, conn=Dep
     if result == "UPDATE 0":
         raise HTTPException(status_code=409, detail="Someone else just recorded this approval — refresh and try again")
     if done:
-        cfg = await _config(conn, company_id)
-        names = [f"Level {i} ({cfg[f'l{i}_title']}): {current_user.full_name if i == lvl else row[f'l{i}_approver_name']}"
+        names = [f"{cfg[f'l{i}_title']}: {current_user.full_name if i == lvl else row[f'l{i}_approver_name']}"
                  for i in range(1, lvl + 1)]
         await _tell_bid_manager(conn, rfp_id, company_id, "pricing approved",
                                 ["The pricing is fully approved.", *names], "RFP_PRICING")
+    else:
+        await _email_approver(conn, rfp_id, company_id, cfg, lvl + 1)
     return await _payload(conn, module, rfp_id, current_user)
 
 
@@ -205,7 +234,8 @@ async def send_back_pricing(module: Module, rfp_id: int, body: SendBackIn, conn=
                             current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
     await require_rfp(conn, module, rfp_id, company_id)
-    if not current_user.has_role(*APPROVER_ROLES):
+    cfg = await get_pricing_config(conn, company_id)
+    if not (_may_approve(cfg, 1, current_user) or _may_approve(cfg, 2, current_user)):
         raise HTTPException(status_code=403, detail="You aren't one of the pricing approvers")
     note = body.note.strip()
     if not note:

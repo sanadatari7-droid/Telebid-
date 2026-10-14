@@ -795,6 +795,39 @@ async def run_migrations():
             ADD COLUMN IF NOT EXISTS released_on  DATE,
             ADD COLUMN IF NOT EXISTS release_note TEXT;
         """,
+        # ── Approvals as the business runs them: VP Sales, higher level, Contracting ──
+        """
+        -- Approvals (Module 1 / C), as the business runs them: pricing goes straight to the VP Sales;
+        -- above the VP's limit a higher level approves too. Special terms go to Contracting by email,
+        -- with the files the bid manager attaches.
+        ALTER TABLE company_pricing_approval
+            ADD COLUMN IF NOT EXISTS l1_name           VARCHAR(150),
+            ADD COLUMN IF NOT EXISTS l1_email          VARCHAR(500),
+            ADD COLUMN IF NOT EXISTS l2_name           VARCHAR(150),
+            ADD COLUMN IF NOT EXISTS l2_email          VARCHAR(500),
+            ADD COLUMN IF NOT EXISTS contracting_name  VARCHAR(150) NOT NULL DEFAULT 'Contracting',
+            ADD COLUMN IF NOT EXISTS contracting_email VARCHAR(500);
+        ALTER TABLE company_pricing_approval ALTER COLUMN l1_title SET DEFAULT 'VP Sales';
+        ALTER TABLE company_pricing_approval ALTER COLUMN l2_title SET DEFAULT 'Higher management';
+        UPDATE company_pricing_approval SET l1_title='VP Sales', l2_title='Higher management'
+            WHERE l1_title='Bid Department Manager' AND l2_title='Sales VP';
+        ALTER TABLE rfp_checklists
+            ADD COLUMN IF NOT EXISTS special_terms_sent_at    TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS special_terms_sent_to    VARCHAR(500),
+            ADD COLUMN IF NOT EXISTS special_terms_sent_by    VARCHAR(150),
+            ADD COLUMN IF NOT EXISTS special_terms_send_error TEXT;
+        CREATE TABLE IF NOT EXISTS rfp_checklist_files (
+            file_id       SERIAL PRIMARY KEY,
+            rfp_id        INT NOT NULL REFERENCES rfps(rfp_id) ON DELETE CASCADE,
+            filename      VARCHAR(255) NOT NULL,
+            content_type  VARCHAR(150) NOT NULL,
+            size_bytes    INT NOT NULL,
+            data          BYTEA NOT NULL,
+            uploaded_by   VARCHAR(150),
+            uploaded_at   TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_rfp_checklist_files_rfp ON rfp_checklist_files(rfp_id);
+        """,
     ]
 
     async with pool.acquire() as conn:

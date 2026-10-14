@@ -1,15 +1,18 @@
 """Sub-module C of Modules 2–4 (after B, the bid bond) — the RFP checklist.
 
 - Site visit: Yes / No; if Yes, the sales person assigned to it.
-- Others — special terms and conditions: if there are any, the bid department approves
-  them (Approved / Not approved) and the RFP's bid manager is told the outcome.
+- Others — special terms and conditions: if there are any, the bid manager attaches the documents
+  and sends them by email to Contracting (set in Company Settings → Approvals). Contracting's answer
+  (Approved / Not approved) is recorded here and the bid manager is told the outcome.
+  EXPRO bids have no checklist.
 - Insurance: Yes / No; if Yes, the policies the client requires, picked from a list that
   users can add to (System Settings → Dropdowns → Insurance policy).
 """
 import html
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.db.postgres import get_db, fetch_all, fetch_one, fetch_val, execute, require_company
@@ -19,8 +22,8 @@ from app.services.email_service import send_email, smtp_configured
 
 router = APIRouter(prefix="/rfps", tags=["RFP checklist"])
 
-# Who decides on special terms and conditions: the bid department.
-DECIDER_ROLES = ("ADMIN", "DEPT_MANAGER")
+MAX_FILE_BYTES = 10 * 1024 * 1024     # per attachment
+MAX_TOTAL_BYTES = 20 * 1024 * 1024    # all attachments of one bid (they go in one email)
 POLICY_LIST = "insurance_policy"
 DEFAULT_POLICIES = [
     ("GENERAL_LIABILITY", "General liability insurance", "تأمين المسؤولية العامة"),
@@ -66,7 +69,13 @@ async def _policies(conn, company_id: int) -> list:
         ORDER BY sort_order, option_label""", company_id, POLICY_LIST)
 
 
+def _no_expro(module: Module):
+    if module == Module.expro:
+        raise HTTPException(status_code=404, detail="EXPRO bids have no checklist")
+
+
 async def _payload(conn, module: Module, rfp_id: int, current_user) -> dict:
+    _no_expro(module)
     company_id = require_company(current_user)
     await require_rfp(conn, module, rfp_id, company_id)
     checklist = await fetch_one(conn, """
@@ -76,14 +85,19 @@ async def _payload(conn, module: Module, rfp_id: int, current_user) -> dict:
     bid_manager = await fetch_one(conn, """
         SELECT bm.full_name, bm.email FROM rfps r JOIN company_bid_managers bm ON bm.bm_id = r.bm_id
         WHERE r.rfp_id=$1""", rfp_id)
+    contracting = await fetch_one(conn, """
+        SELECT contracting_name AS name, contracting_email AS email FROM company_pricing_approval WHERE company_id=$1""", company_id)
     return {
+        "files": await fetch_all(conn, """
+            SELECT file_id, filename, content_type, size_bytes, uploaded_by, uploaded_at
+            FROM rfp_checklist_files WHERE rfp_id=$1 ORDER BY file_id""", rfp_id),
+        "contracting": contracting or {"name": "Contracting", "email": None},
         "checklist": checklist,
         "policies": await _policies(conn, company_id),
         "salesmen": await fetch_all(conn, """
             SELECT am_id AS id, full_name AS name FROM company_account_managers
             WHERE company_id=$1 AND is_active=TRUE ORDER BY full_name""", company_id),
         "bid_manager": bid_manager,
-        "can_decide": current_user.has_role(*DECIDER_ROLES),
     }
 
 
@@ -112,6 +126,7 @@ async def get_checklist(module: Module, rfp_id: int, conn=Depends(get_db), curre
 @router.put("/{module}/{rfp_id:int}/checklist")
 async def save_checklist(module: Module, rfp_id: int, body: ChecklistIn, conn=Depends(get_db),
                          current_user=Depends(get_current_user)):
+    _no_expro(module)
     company_id = require_company(current_user)
     await require_rfp(conn, module, rfp_id, company_id)
 
@@ -156,25 +171,122 @@ async def save_checklist(module: Module, rfp_id: int, body: ChecklistIn, conn=De
             rfp_id, body.site_visit_required, am_id, body.special_terms_required, terms, status,
             body.insurance_required, policies, current_user.user_id)
         if changed or terms is None:
+            # New or changed terms have to be sent to Contracting (again).
             await execute(conn, """
                 UPDATE rfp_checklists SET special_terms_decided_by=NULL, special_terms_decider_name=NULL,
-                       special_terms_decided_at=NULL, special_terms_note=NULL WHERE rfp_id=$1""", rfp_id)
-    if changed:
-        await _tell_bid_manager(conn, rfp_id, company_id, "special terms waiting for bid department approval",
-                                ["These special terms and conditions were added and are waiting for the bid department's approval:", terms])
+                       special_terms_decided_at=NULL, special_terms_note=NULL, special_terms_sent_at=NULL,
+                       special_terms_sent_to=NULL, special_terms_sent_by=NULL, special_terms_send_error=NULL
+                WHERE rfp_id=$1""", rfp_id)
+    return await _payload(conn, module, rfp_id, current_user)
+
+
+async def _terms_row(conn, module: Module, rfp_id: int, company_id: int):
+    _no_expro(module)
+    await require_rfp(conn, module, rfp_id, company_id)
+    row = await fetch_one(conn, "SELECT special_terms FROM rfp_checklists WHERE rfp_id=$1", rfp_id)
+    if not row or not row["special_terms"]:
+        raise HTTPException(status_code=400, detail="Save the special terms and conditions first")
+    return row
+
+
+@router.post("/{module}/{rfp_id:int}/checklist/files", status_code=201)
+async def upload_terms_file(module: Module, rfp_id: int, file: UploadFile = File(...), conn=Depends(get_db),
+                            current_user=Depends(get_current_user)):
+    """A document for Contracting (the terms, the client's RFP pages, …), sent with the email."""
+    company_id = require_company(current_user)
+    _no_expro(module)
+    await require_rfp(conn, module, rfp_id, company_id)
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="The file is empty")
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="A file can be at most 10 MB")
+    total = await fetch_val(conn, "SELECT COALESCE(SUM(size_bytes),0) FROM rfp_checklist_files WHERE rfp_id=$1", rfp_id)
+    if total + len(data) > MAX_TOTAL_BYTES:
+        raise HTTPException(status_code=400, detail="All attachments together can be at most 20 MB, so they fit in one email")
+    name = (file.filename or "attachment").replace("\\", "/").split("/")[-1][:255]
+    file_id = await fetch_val(conn, """
+        INSERT INTO rfp_checklist_files (rfp_id, filename, content_type, size_bytes, data, uploaded_by)
+        VALUES ($1,$2,$3,$4,$5,$6) RETURNING file_id""",
+        rfp_id, name, (file.content_type or "application/octet-stream")[:150], len(data), data, current_user.full_name)
+    return {"file_id": file_id, "filename": name, "size_bytes": len(data)}
+
+
+@router.get("/{module}/{rfp_id:int}/checklist/files/{file_id:int}")
+async def download_terms_file(module: Module, rfp_id: int, file_id: int, conn=Depends(get_db),
+                              current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    _no_expro(module)
+    await require_rfp(conn, module, rfp_id, company_id)
+    f = await fetch_one(conn, "SELECT filename, content_type, data FROM rfp_checklist_files WHERE file_id=$1 AND rfp_id=$2",
+                        file_id, rfp_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    safe = f["filename"].replace('"', "")
+    return Response(content=bytes(f["data"]), media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}"'})
+
+
+@router.delete("/{module}/{rfp_id:int}/checklist/files/{file_id:int}")
+async def delete_terms_file(module: Module, rfp_id: int, file_id: int, conn=Depends(get_db),
+                            current_user=Depends(get_current_user)):
+    company_id = require_company(current_user)
+    _no_expro(module)
+    await require_rfp(conn, module, rfp_id, company_id)
+    if await execute(conn, "DELETE FROM rfp_checklist_files WHERE file_id=$1 AND rfp_id=$2", file_id, rfp_id) == "DELETE 0":
+        raise HTTPException(status_code=404, detail="File not found")
+    return await _payload(conn, module, rfp_id, current_user)
+
+
+@router.post("/{module}/{rfp_id:int}/checklist/special-terms/send")
+async def send_terms_to_contracting(module: Module, rfp_id: int, conn=Depends(get_db),
+                                    current_user=Depends(get_current_user)):
+    """Emails the special terms, with every attachment, to Contracting for approval."""
+    company_id = require_company(current_user)
+    row = await _terms_row(conn, module, rfp_id, company_id)
+    cfg = await fetch_one(conn, "SELECT contracting_name, contracting_email FROM company_pricing_approval WHERE company_id=$1",
+                          company_id)
+    error = None
+    if not cfg or not cfg["contracting_email"]:
+        error = "No Contracting email is set (Company Settings → C · Approvals), so nothing was sent"
+    elif not await smtp_configured(company_id):
+        error = "Email isn't set up yet (System Settings → Email), so nothing was sent"
+    else:
+        info = await fetch_one(conn, """
+            SELECT r.rfp_number, r.rfp_title, r.rfp_ref, r.submission_date, c.name_en, bm.full_name AS bm_name
+            FROM rfps r JOIN clients c ON c.client_id = r.client_id
+            LEFT JOIN company_bid_managers bm ON bm.bm_id = r.bm_id WHERE r.rfp_id=$1""", rfp_id)
+        files = await fetch_all(conn, "SELECT filename, content_type, data FROM rfp_checklist_files WHERE rfp_id=$1 ORDER BY file_id", rfp_id)
+        lines = [f"Dear {cfg['contracting_name']},",
+                 f"Please review and approve the special terms and conditions for bid {info['rfp_number']}"
+                 + (f" ({info['rfp_ref']})" if info["rfp_ref"] else "") + f" — {info['name_en']}"
+                 + (f" — {info['rfp_title']}" if info["rfp_title"] else "") + ".",
+                 f"Submission date: {info['submission_date']:%d %b %Y}",
+                 "Special terms and conditions:", row["special_terms"]]
+        if files:
+            lines.append(f"Attached: {', '.join(f['filename'] for f in files)}")
+        lines.append(f"Sent by {current_user.full_name}" + (f" for bid manager {info['bm_name']}" if info["bm_name"] and info["bm_name"] != current_user.full_name else "") + ".")
+        subject = f"{info['rfp_number']}: special terms for approval — {info['name_en']}"
+        ok = await send_email(cfg["contracting_email"], subject, "".join(f"<p>{html.escape(l)}</p>".replace("\n", "<br>") for l in lines),
+                              "\n\n".join(lines), company_id, attachments=[(f["filename"], f["content_type"], bytes(f["data"])) for f in files])
+        if not ok:
+            error = "The email server didn't accept the message — check the Contracting address and email settings, then send again"
+    if error:
+        await execute(conn, "UPDATE rfp_checklists SET special_terms_send_error=$2 WHERE rfp_id=$1", rfp_id, error)
+        raise HTTPException(status_code=400, detail=error)
+    await execute(conn, """
+        UPDATE rfp_checklists SET special_terms_sent_at=NOW(), special_terms_sent_to=$2, special_terms_sent_by=$3,
+               special_terms_send_error=NULL, special_terms_status='PENDING' WHERE rfp_id=$1""",
+        rfp_id, cfg["contracting_email"], current_user.full_name)
     return await _payload(conn, module, rfp_id, current_user)
 
 
 @router.post("/{module}/{rfp_id:int}/checklist/special-terms")
 async def decide_special_terms(module: Module, rfp_id: int, body: DecisionIn, conn=Depends(get_db),
                                current_user=Depends(get_current_user)):
+    """Records Contracting's answer (they reply to the email)."""
     company_id = require_company(current_user)
-    await require_rfp(conn, module, rfp_id, company_id)
-    if not current_user.has_role(*DECIDER_ROLES):
-        raise HTTPException(status_code=403, detail="Only the bid department can approve special terms and conditions")
-    row = await fetch_one(conn, "SELECT special_terms FROM rfp_checklists WHERE rfp_id=$1", rfp_id)
-    if not row or not row["special_terms"]:
-        raise HTTPException(status_code=400, detail="There are no special terms and conditions to approve")
+    row = await _terms_row(conn, module, rfp_id, company_id)
     note = (body.note or "").strip() or None
     await execute(conn, """
         UPDATE rfp_checklists SET special_terms_status=$2, special_terms_decided_by=$3, special_terms_decider_name=$4,
@@ -182,7 +294,7 @@ async def decide_special_terms(module: Module, rfp_id: int, body: DecisionIn, co
         rfp_id, body.decision, current_user.user_id, current_user.full_name, note)
     word = "approved" if body.decision == "APPROVED" else "not approved"
     await _tell_bid_manager(conn, rfp_id, company_id, f"special terms {word}",
-                            [f"The bid department ({current_user.full_name}) marked the special terms and conditions as {word}.",
+                            [f"Contracting's answer: the special terms and conditions are {word} (recorded by {current_user.full_name}).",
                              row["special_terms"], *([f"Note: {note}"] if note else [])])
     return await _payload(conn, module, rfp_id, current_user)
 

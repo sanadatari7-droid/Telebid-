@@ -8,8 +8,10 @@ import { rfpApi } from "../services/api"
 import { fmt } from "../utils/fmt"
 import { RFP_MODULES, STATUS_STYLE, LOST_STATUSES, optionLabel, formatMoney } from "../utils/rfp"
 
-// Every bid from RFP ICT (Module 2) and RFP Telecom (Module 3) in one list.
-const MODULES = ["ict", "telecom"]
+// Every bid from Bid ICT (Module 2), Bid Telecom (Module 3) and EXPRO (Module 4) in one list.
+const MODULES = ["ict", "telecom", "expro"]
+const MOD_LABEL = { ict: "ICT", telecom: "Telecom", expro: "EXPRO" }
+const MOD_STYLE = { ict: "bg-blue-50 text-blue-700", telecom: "bg-teal-50 text-teal-700", expro: "bg-violet-50 text-violet-700" }
 const GO_STYLE = { GO: "bg-green-100 text-green-700", NO_GO: "bg-red-100 text-red-700", INCOMPLETE: "bg-amber-100 text-amber-700", NOT_SET_UP: "bg-gray-100 text-gray-500" }
 const GO_LABEL = { GO: "Go", NO_GO: "No-Go", INCOMPLETE: "Incomplete", NOT_SET_UP: "Not set up" }
 const STATUS_FILTERS = [
@@ -33,12 +35,13 @@ export default function AllBidsPage() {
   const lang = i18n.language
   const ict = useModuleData("ict")
   const tel = useModuleData("telecom")
-  const data = { ict, telecom: tel }
+  const exp = useModuleData("expro")
+  const data = { ict, telecom: tel, expro: exp }
   const [q, setQ] = useState("")
   const [mod, setMod] = useState("all")
   const [filter, setFilter] = useState("all")
 
-  const all = [...ict.rows, ...tel.rows].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+  const all = [...ict.rows, ...tel.rows, ...exp.rows].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
   const inModule = all.filter(r => mod === "all" || r._module === mod)
   const counts = Object.fromEntries(STATUS_FILTERS.map(f => [f.id, inModule.filter(r => f.match(r.status)).length]))
   const needle = q.trim().toLowerCase()
@@ -46,19 +49,19 @@ export default function AllBidsPage() {
     [r.rfp_number, r.rfp_title, r.rfp_ref, r.client_name_en, r.client_name_ar, r.am_name].some(v => (v || "").toLowerCase().includes(needle))))
   const currency = ict.currency || tel.currency
   const cur = currency?.code ? ` · ${currency.code}` : ""
-  const loading = ict.loading || tel.loading
+  const loading = ict.loading || tel.loading || exp.loading
 
   return (
     <div className="p-6 max-w-screen-xl mx-auto space-y-5">
       <div className="page-header">
         <div>
           <h1 className="page-title">Bids</h1>
-          <p className="page-subtitle">Every bid from RFP ICT and RFP Telecom in one list</p>
+          <p className="page-subtitle">Every bid from Bid ICT, Bid Telecom and EXPRO in one list</p>
         </div>
         <div className="flex gap-2">
           {MODULES.map(m => (
             <button key={m} className="btn-primary" onClick={() => navigate(`${RFP_MODULES[m].path}/new`)}>
-              <Plus size={14}/> New {m === "ict" ? "ICT" : "Telecom"} bid
+              <Plus size={14}/> New {MOD_LABEL[m]} bid
             </button>
           ))}
         </div>
@@ -70,7 +73,7 @@ export default function AllBidsPage() {
           <input className="input pl-9" placeholder="Search client, title, bid number or reference" value={q} onChange={e => setQ(e.target.value)}/>
         </div>
         <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-          {[["all", "Both"], ["ict", "ICT"], ["telecom", "Telecom"]].map(([id, lbl]) => (
+          {[["all", "All"], ["ict", "ICT"], ["telecom", "Telecom"], ["expro", "EXPRO"]].map(([id, lbl]) => (
             <button key={id} onClick={() => setMod(id)}
               className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium", mod === id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-900")}>
               {lbl}
@@ -102,7 +105,7 @@ export default function AllBidsPage() {
                 <tr><td colSpan={9} className="py-12">
                   <div className="empty-state">
                     <div className="empty-icon mx-auto"><Briefcase size={28}/></div>
-                    <p className="text-sm text-gray-400">{all.length ? "No bids match this search." : "No bids yet. Use \"New ICT bid\" or \"New Telecom bid\" to add the first one."}</p>
+                    <p className="text-sm text-gray-400">{all.length ? "No bids match this search." : "No bids yet. Use one of the \"New … bid\" buttons to add the first one."}</p>
                   </div>
                 </td></tr>
               ) : shown.map(r => {
@@ -112,10 +115,10 @@ export default function AllBidsPage() {
                   <tr key={`${r._module}-${r.rfp_id}`} className="cursor-pointer" onClick={() => navigate(`${RFP_MODULES[r._module].path}/${r.rfp_id}`)}>
                     <td className="max-w-[200px]">
                       <div className="font-mono text-xs text-blue-600 whitespace-nowrap">{r.rfp_number}</div>
-                      {r.rfp_title && <div className="text-sm text-gray-900 truncate" title={r.rfp_title}>{r.rfp_title}</div>}
+                      {(r.rfp_title || r.sow) && <div className="text-sm text-gray-900 truncate" title={r.rfp_title || r.sow}>{r.rfp_title || r.sow}</div>}
                       {r.rfp_ref && <div className="text-xs text-gray-500 truncate">{r.rfp_ref}</div>}
                     </td>
-                    <td><span className={clsx("badge text-xs", r._module === "ict" ? "bg-blue-50 text-blue-700" : "bg-teal-50 text-teal-700")}>{r._module === "ict" ? "ICT" : "Telecom"}</span></td>
+                    <td><span className={clsx("badge text-xs", MOD_STYLE[r._module])}>{MOD_LABEL[r._module]}</span></td>
                     <td className="min-w-[140px]">
                       <div className="font-medium text-gray-900 flex items-center gap-1">
                         {r.client_name_en}{r.is_strategic && <Star size={11} className="text-amber-500 fill-amber-400"/>}

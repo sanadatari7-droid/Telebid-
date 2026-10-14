@@ -37,28 +37,33 @@ function Money({ value, onChange, currency, placeholder = "0" }) {
 const n = v => (v === "" || v === null || v === undefined ? null : Number(v))
 const round2 = x => Math.round(x * 100) / 100
 
-// The same rules as the server: which level has to approve these figures, and why.
+// The same rules as the server: the VP Sales approves within their limit; beyond it (or with a
+// low EBITDA) the VP gets approval from the higher level too.
 function assess(basis, f, cfg) {
   const price = n(f.price), cost = n(f.cost), list = n(f.list_price), ebitda = n(f.ebitda_pct)
+  const vp = cfg.l1_title
   if (!(price > 0)) return null
-  let pct, level, reasons = []
+  let pct, within, reason
   if (basis === "MARGIN") {
     if (cost === null) return null
     pct = round2((price - cost) / price * 100)
-    const l1 = n(cfg.ict_l1_min_margin), l2 = n(cfg.ict_l2_min_margin)
-    if (l1 !== null && pct >= l1) { level = 1; reasons.push(`Margin ${pct}% is at least Level 1's minimum of ${l1}%`) }
-    else if (l2 !== null && pct >= l2) { level = 2; reasons.push(`Margin ${pct}% is below Level 1's minimum but at least Level 2's minimum of ${l2}%`) }
-    else { level = 3; reasons.push(`Margin ${pct}% is below Level 2's minimum${l2 !== null ? ` of ${l2}%` : ""}`) }
+    const limit = n(cfg.ict_l1_min_margin)
+    within = limit === null || pct >= limit
+    reason = limit === null ? `Margin ${pct}% — no limit is set, so the ${vp} approves`
+      : within ? `Margin ${pct}% is at least the ${vp}'s minimum of ${limit}%` : `Margin ${pct}% is below the ${vp}'s minimum of ${limit}%`
   } else {
     if (!(list > 0) || price > list) return null
     pct = round2((list - price) / list * 100)
-    const l1 = n(cfg.telecom_l1_max_discount), l2 = n(cfg.telecom_l2_max_discount)
-    if (l1 !== null && pct <= l1) { level = 1; reasons.push(`Discount ${pct}% is within Level 1's limit of ${l1}%`) }
-    else if (l2 !== null && pct <= l2) { level = 2; reasons.push(`Discount ${pct}% is above Level 1's limit but within Level 2's limit of ${l2}%`) }
-    else { level = 3; reasons.push(`Discount ${pct}% is above Level 2's limit${l2 !== null ? ` of ${l2}%` : ""}`) }
+    const limit = n(cfg.telecom_l1_max_discount)
+    within = limit === null || pct <= limit
+    reason = limit === null ? `Discount ${pct}% — no limit is set, so the ${vp} approves`
+      : within ? `Discount ${pct}% is within the ${vp}'s limit of ${limit}%` : `Discount ${pct}% is above the ${vp}'s limit of ${limit}%`
   }
+  const reasons = [reason]
+  let level = within ? 1 : 2
   const emin = n(cfg.ebitda_min_pct)
-  if (emin !== null && ebitda !== null && ebitda < emin) { level = 3; reasons.push(`EBITDA ${ebitda}% is below the ${emin}% minimum, so Level 3 must approve`) }
+  if (emin !== null && ebitda !== null && ebitda < emin) { level = 2; reasons.push(`EBITDA ${ebitda}% is below the company minimum of ${emin}%`) }
+  if (level === 2) reasons.push(`The ${vp} approves first, then gets approval from ${cfg.l2_title}`)
   return { pct, level, reasons }
 }
 
@@ -111,15 +116,16 @@ export default function RfpPricing({ module, rfpId }) {
   if (isLoading || !data || !form) return <div className="card text-sm text-gray-400">Loading pricing…</div>
   const { pricing, config, currency, basis, can_approve } = data
   const margin = basis === "MARGIN"
-  const titles = [config.l1_title, config.l2_title, config.l3_title]
+  const titles = [config.l1_title, config.l2_title]
+  const people = [config.l1_name, config.l2_name]
   const live = assess(basis, form, config)
   const figuresChanged = pricing && (["cost", "price", "list_price", "ebitda_pct"].some(k => str(pricing[k]) !== (form[k] === "" ? "" : String(Number(form[k])))))
   const restarts = pricing && (figuresChanged || pricing.status === "SENT_BACK")
   const hasApprovals = pricing && pricing.approval_level > 0
   const offerBad = !margin && n(form.price) > 0 && n(form.list_price) > 0 && n(form.price) > n(form.list_price)
   const canSave = !!live && !saveMut.isPending
-  const noLimits = margin ? config.ict_l1_min_margin === null && config.ict_l2_min_margin === null
-                          : config.telecom_l1_max_discount === null && config.telecom_l2_max_discount === null
+  const noLimits = margin ? config.ict_l1_min_margin === null : config.telecom_l1_max_discount === null
+  const noVp = !config.l1_email
   const st = pricing && STATUS[pricing.status]
 
   return (
@@ -132,10 +138,11 @@ export default function RfpPricing({ module, rfpId }) {
                     : "Enter the list price and the price we offer. The discount decides who has to approve it."}
           </p>
         </div>
-        {noLimits && (
+        {(noVp || noLimits) && (
           <div className="mt-2 mb-1 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
-            The {margin ? "margin" : "discount"} limits aren't set yet, so every pricing goes to Level 3.{" "}
-            <Link to="/company-settings" className="font-semibold underline">Set them in Company Settings → Pricing Approval Cycle</Link>
+            {noVp ? `No ${config.l1_title} is assigned yet, so nobody gets the approval email. ` : ""}
+            {noLimits ? `The ${config.l1_title}'s ${margin ? "minimum margin" : "maximum discount"} isn't set, so the ${config.l1_title} approves any figure. ` : ""}
+            <Link to="/company-settings" className="font-semibold underline">Set it in Company Settings → C · Approvals</Link>
           </div>
         )}
 
@@ -173,7 +180,7 @@ export default function RfpPricing({ module, rfpId }) {
             <input type="number" step="0.1" className="input pr-8 tabular-nums" value={form.ebitda_pct} onChange={e => set("ebitda_pct", e.target.value)} placeholder="—"/>
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
           </div>
-          {config.ebitda_min_pct !== null && <p className="text-xs text-gray-400 mt-1">Below {Number(config.ebitda_min_pct)}% always needs Level 3.</p>}
+          {config.ebitda_min_pct !== null && <p className="text-xs text-gray-400 mt-1">Below {Number(config.ebitda_min_pct)}% also needs {config.l2_title}.</p>}
         </Row>
         <Row num="5" label="Notes for the approvers" source="Optional">
           <textarea className="input min-h-[70px]" value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="e.g. Strategic client, price matched to last year's award"/>
@@ -181,7 +188,7 @@ export default function RfpPricing({ module, rfpId }) {
 
         {live && (
           <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-sm text-blue-900 mt-2">
-            <div className="font-semibold">Needs approval up to Level {live.level} — {titles[live.level - 1]}</div>
+            <div className="font-semibold">{live.level === 1 ? `Goes to the ${titles[0]} for approval` : `Needs the ${titles[0]}, then ${titles[1]}`}</div>
             <ul className="text-xs text-blue-800 mt-1 space-y-0.5">{live.reasons.map(r => <li key={r}>• {r}</li>)}</ul>
           </div>
         )}
@@ -212,7 +219,7 @@ export default function RfpPricing({ module, rfpId }) {
 
         <div className="card-sm bg-blue-50 border-blue-100 space-y-2">
           <div className="section-title text-xs mb-1">Approval cycle</div>
-          {[1, 2, 3].map(lvl => {
+          {[1, 2].map(lvl => {
             const required = pricing ? pricing.required_level : live?.level
             const notNeeded = required && lvl > required
             const done = pricing && pricing.approval_level >= lvl
@@ -221,11 +228,14 @@ export default function RfpPricing({ module, rfpId }) {
               <div key={lvl} className={clsx("flex flex-wrap items-center justify-between gap-x-3 gap-y-1 p-2.5 rounded-lg bg-white border border-blue-100", notNeeded && "opacity-50")}>
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={clsx("badge flex-shrink-0", done ? "bg-green-100 text-green-700" : "badge-gray")}>L{lvl}</span>
-                  <span className="text-sm font-semibold text-gray-900">{titles[lvl - 1]}</span>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900">{titles[lvl - 1]}</div>
+                    {people[lvl - 1] && <div className="text-xs text-gray-500 truncate">{people[lvl - 1]}</div>}
+                  </div>
                 </div>
                 {done ? <span className="text-xs text-green-700 font-medium">✓ {pricing[`l${lvl}_approver_name`]} · {fmtDT(pricing[`l${lvl}_approved_at`])}</span>
-                  : notNeeded ? <span className="text-xs text-gray-400">Not needed</span>
-                  : isNext && can_approve ? (
+                  : notNeeded ? <span className="text-xs text-gray-400">Only if above the {titles[0]}'s limit</span>
+                  : isNext && can_approve[lvl - 1] ? (
                     <button className="btn-primary btn-sm" disabled={approveMut.isPending} onClick={() => approveMut.mutate(lvl)}>
                       <Check size={12}/> {approveMut.isPending ? "Approving…" : "Approve"}
                     </button>)
@@ -233,7 +243,7 @@ export default function RfpPricing({ module, rfpId }) {
               </div>
             )
           })}
-          {pricing?.status === "PENDING" && can_approve && (
+          {pricing?.status === "PENDING" && can_approve.some(Boolean) && (
             showBack ? (
               <div className="space-y-2 pt-1">
                 <textarea className="input text-sm min-h-[60px]" autoFocus placeholder="Why is it being sent back?" value={backNote} onChange={e => setBackNote(e.target.value)}/>
@@ -248,8 +258,10 @@ export default function RfpPricing({ module, rfpId }) {
               <button className="btn-ghost btn-sm text-xs text-red-600" onClick={() => setShowBack(true)}><Undo2 size={11}/> Send back with a reason</button>
             )
           )}
-          {pricing?.status === "PENDING" && !can_approve && <p className="text-xs text-gray-500">An admin, department manager or director approves each level.</p>}
-          <p className="text-[11px] text-gray-400 pt-1">The levels and limits are set in Company Settings → Pricing Approval Cycle. The bid manager is told the outcome.</p>
+          {pricing?.status === "PENDING" && !can_approve[pricing.approval_level] && (
+            <p className="text-xs text-gray-500">Waiting for {people[pricing.approval_level] || `the ${titles[pricing.approval_level]}`} — they get an email.</p>
+          )}
+          <p className="text-[11px] text-gray-400 pt-1">Who approves, and their limit, is set in Company Settings → C · Approvals. The bid manager is told the outcome.</p>
         </div>
       </aside>
     </div>

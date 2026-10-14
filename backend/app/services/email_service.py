@@ -3,6 +3,8 @@ import logging
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,9 @@ async def smtp_configured(company_id: int) -> bool:
     smtp = await _get_smtp_config(company_id)
     return bool(smtp["host"] and smtp["user"])
 
-async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1) -> bool:
+async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1,
+                     attachments: list = None) -> bool:
+    """attachments: [(filename, content_type, bytes)], sent as regular file attachments."""
     try:
         smtp = await _get_smtp_config(company_id)
     except Exception:
@@ -54,12 +58,24 @@ async def send_email(to: str, subject: str, body_html: str, body_text: str = "",
         logger.info(f"SMTP not configured — skipping email to {to}: {subject}")
         return False
     try:
-        msg = MIMEMultipart("alternative")
+        body = MIMEMultipart("alternative")
+        if body_text: body.attach(MIMEText(body_text,"plain"))
+        body.attach(MIMEText(body_html,"html"))
+        if attachments:
+            msg = MIMEMultipart("mixed")
+            msg.attach(body)
+            for filename, content_type, data in attachments:
+                maintype, _, subtype = (content_type or "application/octet-stream").partition("/")
+                part = MIMEBase(maintype or "application", subtype or "octet-stream")
+                part.set_payload(data)
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=filename)
+                msg.attach(part)
+        else:
+            msg = body
         msg["Subject"] = subject
         msg["From"] = f"{smtp['from_name']} <{smtp['from_email'] or smtp['user']}>"
         msg["To"] = to
-        if body_text: msg.attach(MIMEText(body_text,"plain"))
-        msg.attach(MIMEText(body_html,"html"))
         await aiosmtplib.send(msg, hostname=smtp["host"], port=smtp["port"],
             username=smtp["user"], password=smtp["password"],
             use_tls=False, start_tls=smtp["use_tls"])

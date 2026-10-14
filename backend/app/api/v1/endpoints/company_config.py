@@ -27,14 +27,19 @@ class EvaluatorCreate(BaseModel):
     title: str
 
 class PricingApprovalUpdate(BaseModel):
-    l1_title: str = Field("Bid Department Manager", min_length=1, max_length=100)
-    l2_title: str = Field("Sales VP", min_length=1, max_length=100)
-    l3_title: str = Field("Finance", min_length=1, max_length=100)
+    # Pricing goes straight to the VP Sales (Level 1). Above the VP's limit, the VP
+    # gets approval from a higher level (Level 2). Special terms go to Contracting by email.
+    l1_title: str = Field("VP Sales", min_length=1, max_length=100)
+    l1_name: Optional[str] = Field(None, max_length=150)
+    l1_email: Optional[str] = Field(None, max_length=500)
+    l2_title: str = Field("Higher management", min_length=1, max_length=100)
+    l2_name: Optional[str] = Field(None, max_length=150)
+    l2_email: Optional[str] = Field(None, max_length=500)
     telecom_l1_max_discount: Optional[float] = Field(None, ge=0, le=100)
-    telecom_l2_max_discount: Optional[float] = Field(None, ge=0, le=100)
     ict_l1_min_margin: Optional[float] = Field(None, ge=0, le=100)
-    ict_l2_min_margin: Optional[float] = Field(None, ge=0, le=100)
     ebitda_min_pct: Optional[float] = Field(None, ge=-100, le=100)
+    contracting_name: str = Field("Contracting", min_length=1, max_length=150)
+    contracting_email: Optional[str] = Field(None, max_length=500)
 
 class BondApprovalUpdate(BaseModel):
     l1_title: str = Field("Bid Department Manager", min_length=1, max_length=100)
@@ -62,9 +67,10 @@ def normalize_email_list(raw: Optional[str]) -> Optional[str]:
     return ", ".join(parts)
 
 PRICING_DEFAULTS = {
-    "l1_title": "Bid Department Manager", "l2_title": "Sales VP", "l3_title": "Finance",
-    "telecom_l1_max_discount": None, "telecom_l2_max_discount": None,
-    "ict_l1_min_margin": None, "ict_l2_min_margin": None, "ebitda_min_pct": None,
+    "l1_title": "VP Sales", "l1_name": None, "l1_email": None,
+    "l2_title": "Higher management", "l2_name": None, "l2_email": None,
+    "telecom_l1_max_discount": None, "ict_l1_min_margin": None, "ebitda_min_pct": None,
+    "contracting_name": "Contracting", "contracting_email": None,
 }
 
 class CompanyUpdate(BaseModel):
@@ -192,32 +198,40 @@ async def remove_evaluator(evaluator_id: int, conn=Depends(get_db), current_user
 @router.get("/pricing-approval")
 async def get_pricing_approval(conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
+    return await get_pricing_config(conn, company_id)
+
+
+async def get_pricing_config(conn, company_id: int) -> dict:
     row = await fetch_one(conn, "SELECT * FROM company_pricing_approval WHERE company_id=$1", company_id)
-    return row or {"company_id": company_id, **PRICING_DEFAULTS}
+    if not row:
+        return {"company_id": company_id, **PRICING_DEFAULTS}
+    return {"company_id": company_id, **{k: row[k] for k in PRICING_DEFAULTS}}
 
 @router.put("/pricing-approval")
 async def save_pricing_approval(body: PricingApprovalUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
-    d1, d2 = body.telecom_l1_max_discount, body.telecom_l2_max_discount
-    if d1 is not None and d2 is not None and d1 > d2:
-        raise HTTPException(status_code=400, detail="Telecom: Level 2's maximum discount must be at least Level 1's")
-    m1, m2 = body.ict_l1_min_margin, body.ict_l2_min_margin
-    if m1 is not None and m2 is not None and m1 < m2:
-        raise HTTPException(status_code=400, detail="ICT: Level 2's minimum margin must not be higher than Level 1's")
+    emails = {}
+    for key, label in (("l1_email", body.l1_title), ("l2_email", body.l2_title), ("contracting_email", body.contracting_name)):
+        try:
+            emails[key] = normalize_email_list(getattr(body, key))
+        except ValueError as bad:
+            raise HTTPException(status_code=400, detail=f"{label}: \"{bad}\" isn't a valid email address")
+    text = lambda v: (v or "").strip() or None
     await execute(conn, """
         INSERT INTO company_pricing_approval
-            (company_id, l1_title, l2_title, l3_title, telecom_l1_max_discount, telecom_l2_max_discount,
-             ict_l1_min_margin, ict_l2_min_margin, ebitda_min_pct, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+            (company_id, l1_title, l1_name, l1_email, l2_title, l2_name, l2_email, telecom_l1_max_discount,
+             ict_l1_min_margin, ebitda_min_pct, contracting_name, contracting_email, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
         ON CONFLICT (company_id) DO UPDATE SET
-            l1_title=EXCLUDED.l1_title, l2_title=EXCLUDED.l2_title, l3_title=EXCLUDED.l3_title,
-            telecom_l1_max_discount=EXCLUDED.telecom_l1_max_discount,
-            telecom_l2_max_discount=EXCLUDED.telecom_l2_max_discount,
-            ict_l1_min_margin=EXCLUDED.ict_l1_min_margin, ict_l2_min_margin=EXCLUDED.ict_l2_min_margin,
-            ebitda_min_pct=EXCLUDED.ebitda_min_pct, updated_at=NOW()
-    """, company_id, body.l1_title.strip(), body.l2_title.strip(), body.l3_title.strip(),
-        d1, d2, m1, m2, body.ebitda_min_pct)
-    return {"message": "Pricing approval cycle saved"}
+            l1_title=EXCLUDED.l1_title, l1_name=EXCLUDED.l1_name, l1_email=EXCLUDED.l1_email,
+            l2_title=EXCLUDED.l2_title, l2_name=EXCLUDED.l2_name, l2_email=EXCLUDED.l2_email,
+            telecom_l1_max_discount=EXCLUDED.telecom_l1_max_discount, ict_l1_min_margin=EXCLUDED.ict_l1_min_margin,
+            ebitda_min_pct=EXCLUDED.ebitda_min_pct, contracting_name=EXCLUDED.contracting_name,
+            contracting_email=EXCLUDED.contracting_email, updated_at=NOW()
+    """, company_id, body.l1_title.strip(), text(body.l1_name), emails["l1_email"], body.l2_title.strip(),
+        text(body.l2_name), emails["l2_email"], body.telecom_l1_max_discount, body.ict_l1_min_margin,
+        body.ebitda_min_pct, body.contracting_name.strip(), emails["contracting_email"])
+    return {"message": "Approvals saved"}
 
 # Bid Bond Approval Cycle (Module 1 / Sub-module D)
 async def get_bond_approval_config(conn, company_id: int) -> dict:
@@ -257,7 +271,8 @@ async def setup_status(conn=Depends(get_db), current_user=Depends(get_current_us
     co = await one("""SELECT company_initials, country, currency_id, services_ict, services_telecom FROM companies WHERE company_id=$1""")
     counts = await one("""
         SELECT (SELECT COUNT(*) FROM company_evaluators WHERE company_id=$1 AND is_active) AS evaluators,
-               (SELECT COUNT(*) FROM company_pricing_approval WHERE company_id=$1) AS pricing,
+               (SELECT COUNT(*) FROM company_pricing_approval WHERE company_id=$1
+                  AND COALESCE(l1_email,'') <> '' AND COALESCE(contracting_email,'') <> '') AS pricing,
                (SELECT COUNT(*) FROM company_bond_approval WHERE company_id=$1 AND COALESCE(office_email,'') <> '') AS bond,
                (SELECT COUNT(*) FROM company_account_managers WHERE company_id=$1 AND is_active) AS ams,
                (SELECT COUNT(*) FROM company_bid_managers WHERE company_id=$1 AND is_active) AS bms,
@@ -270,12 +285,12 @@ async def setup_status(conn=Depends(get_db), current_user=Depends(get_current_us
          bool(co and co["company_initials"] and co["country"] and co["currency_id"] and (co["services_ict"] or co["services_telecom"])),
          "/company-settings"),
         ("evaluators", "Add evaluators (name, email, title)", counts["evaluators"] > 0, "/company-settings"),
-        ("pricing", "Set the pricing approval cycle", counts["pricing"] > 0, "/company-settings"),
+        ("pricing", "Approvals: assign the VP Sales for pricing and the Contracting email for special terms", counts["pricing"] > 0, "/company-settings"),
         ("bond", "Set the bid bond approval cycle and the issuance office email", counts["bond"] > 0, "/company-settings"),
         ("team", "Add the team: account managers, bid specialists and presales",
          counts["ams"] > 0 and counts["bms"] > 0 and counts["presales"] > 0, "/company-settings"),
-        ("q_ict", "RFP ICT: set the evaluation questions", counts["q_ict"] > 0, "/rfp-ict?tab=questions"),
-        ("q_tel", "RFP Telecom: set the evaluation questions", counts["q_tel"] > 0, "/rfp-telecom?tab=questions"),
+        ("q_ict", "Bid ICT: set the evaluation questions", counts["q_ict"] > 0, "/rfp-ict?tab=questions"),
+        ("q_tel", "Bid Telecom: set the evaluation questions", counts["q_tel"] > 0, "/rfp-telecom?tab=questions"),
         ("q_expro", "EXPRO: set the evaluation questions", counts["q_expro"] > 0, "/expro-requests?tab=questions"),
     ]
     return {"steps": [{"id": i, "label": l, "done": d, "link": k} for i, l, d, k in steps]}

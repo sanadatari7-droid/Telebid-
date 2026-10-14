@@ -94,7 +94,7 @@ export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
   const mod = RFP_MODULES[module]
   const api = rfpApi(module)
   const key = ["rfp-bid-bond", module, rfpId]
-  const details = mod.expro ? "the request details" : "bid details"
+  const details = "the bid details"
   const qc = useQueryClient()
   const { titles, officeName } = useBondApprovalConfig()
   const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => api.bidBond(rfpId).then(r => r.data) })
@@ -124,9 +124,9 @@ export default function RfpBidBond({ module, rfpId, onGoToDetails }) {
   if (isLoading || !data) return <div className="card text-sm text-gray-400">Loading bid bond…</div>
   const { rfp, currency, bond } = data
   // Field 2 is the RFP title; EXPRO requests have none, so their SOW is offered instead.
-  const titleLabel = mod.expro ? "Request title" : "Bid title"
+  const titleLabel = "Bid title"
   const titleSource = rfp.rfp_title ? "From the bid details — edit if the bond needs different wording"
-    : mod.expro && rfp.sow ? "From the request's SOW — edit if the bond needs different wording"
+    : mod.expro && rfp.sow ? "From the bid's SOW — edit if the bond needs different wording"
     : `Not set in ${details} — type it here`
 
   if (!rfp.bid_bond_required || rfp.bid_bond_pct === null) {

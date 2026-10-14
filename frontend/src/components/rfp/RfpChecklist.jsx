@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import clsx from "clsx"
-import { Check, ChevronDown, X, Plus, MapPin, FileSignature, ShieldCheck, Clock, CheckCircle2, XCircle } from "lucide-react"
+import { Check, ChevronDown, X, Plus, MapPin, FileSignature, ShieldCheck, Clock, CheckCircle2, XCircle, Paperclip, Send, Download, Trash2, AlertTriangle } from "lucide-react"
 import { rfpApi } from "../../services/api"
 import { apiErrorMessage } from "../../utils/apiError"
 import { fmtDT } from "../../utils/fmt"
@@ -73,7 +73,7 @@ function PolicyPicker({ options, selected, onToggle, onAdd }) {
 }
 
 const TERMS_STATUS = {
-  PENDING:      { label: "Waiting for bid department approval", icon: Clock,        cls: "bg-amber-50 border-amber-200 text-amber-800" },
+  PENDING:      { label: "Waiting for Contracting's approval",  icon: Clock,        cls: "bg-amber-50 border-amber-200 text-amber-800" },
   APPROVED:     { label: "Approved",                            icon: CheckCircle2, cls: "bg-green-50 border-green-200 text-green-800" },
   NOT_APPROVED: { label: "Not approved",                        icon: XCircle,      cls: "bg-red-50 border-red-200 text-red-800" },
 }
@@ -95,13 +95,119 @@ function Part({ icon: Icon, num, title, hint, done, children }) {
   )
 }
 
+const fileSize = b => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`
+
+// Special terms go to Contracting by email, with the documents the bid manager attaches.
+function ContractingPanel({ api, rfpId, data, saved, onData }) {
+  const [note, setNote] = useState("")
+  const [uploading, setUploading] = useState(false)
+  const inputRef = useRef(null)
+  const contracting = data.contracting
+  const sent = !!saved.special_terms_sent_at
+  const decided = saved.special_terms_status !== "PENDING"
+  const refresh = r => onData(r.data)
+
+  const upload = async files => {
+    setUploading(true)
+    try {
+      for (const file of files) await api.uploadTermsFile(rfpId, file)
+      refresh(await api.checklist(rfpId))
+    } catch (err) { toast.error(apiErrorMessage(err, "Couldn't attach the file")) }
+    finally { setUploading(false); if (inputRef.current) inputRef.current.value = "" }
+  }
+  const download = async f => {
+    try {
+      const r = await api.downloadTermsFile(rfpId, f.file_id)
+      const url = URL.createObjectURL(r.data)
+      const a = Object.assign(document.createElement("a"), { href: url, download: f.filename })
+      a.click(); URL.revokeObjectURL(url)
+    } catch (err) { toast.error(apiErrorMessage(err, "Couldn't download the file")) }
+  }
+  const removeMut = useMutation({
+    mutationFn: id => api.deleteTermsFile(rfpId, id), onSuccess: refresh,
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't remove the file")),
+  })
+  const sendMut = useMutation({
+    mutationFn: () => api.sendTerms(rfpId),
+    onSuccess: r => { refresh(r); toast.success(`Sent to ${contracting.name}`) },
+    onError: async err => { toast.error(apiErrorMessage(err, "Couldn't send the email")); refresh(await api.checklist(rfpId)) },
+  })
+  const decideMut = useMutation({
+    mutationFn: decision => api.decideTerms(rfpId, { decision, note }),
+    onSuccess: r => { refresh(r); setNote(""); toast.success("Answer saved — the bid manager has been told") },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't save the answer")),
+  })
+
+  const step = (n, label, done) => (
+    <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+      <span className={clsx("w-6 h-6 rounded-lg text-xs font-bold flex items-center justify-center flex-shrink-0",
+        done ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600")}>{done ? "✓" : n}</span>{label}
+    </div>
+  )
+
+  return (
+    <div className="rounded-xl border border-gray-200 p-4 space-y-4">
+      {step("a", "Attach the documents for Contracting", data.files.length > 0)}
+      <div className="pl-8 space-y-2">
+        {data.files.map(f => (
+          <div key={f.file_id} className="flex items-center gap-2 text-sm">
+            <Paperclip size={13} className="text-gray-400 flex-shrink-0"/>
+            <button type="button" className="text-blue-600 hover:underline truncate text-left" onClick={() => download(f)} title="Download">{f.filename}</button>
+            <span className="text-xs text-gray-400 whitespace-nowrap">{fileSize(f.size_bytes)}</span>
+            <button type="button" className="ml-auto text-gray-400 hover:text-red-600" title="Remove" disabled={removeMut.isPending}
+              onClick={() => removeMut.mutate(f.file_id)}><Trash2 size={13}/></button>
+          </div>
+        ))}
+        <input ref={inputRef} type="file" multiple className="hidden" onChange={e => e.target.files.length && upload([...e.target.files])}/>
+        <button type="button" className="btn-secondary btn-sm" disabled={uploading} onClick={() => inputRef.current?.click()}>
+          <Paperclip size={12}/> {uploading ? "Attaching…" : data.files.length ? "Attach more" : "Attach files"}
+        </button>
+        <p className="text-xs text-gray-400">e.g. the client's terms pages, the draft contract. Up to 10 MB each.</p>
+      </div>
+
+      {step("b", `Send to ${contracting.name} by email`, sent)}
+      <div className="pl-8 space-y-2">
+        {sent && <p className="text-xs text-green-700">✓ Sent to {saved.special_terms_sent_to} by {saved.special_terms_sent_by} · {fmtDT(saved.special_terms_sent_at)}</p>}
+        {!contracting.email ? (
+          <p className="text-xs text-amber-700">No Contracting email yet — set it in <Link to="/company-settings" className="underline font-semibold">Company Settings → C · Approvals</Link>.</p>
+        ) : !decided && (
+          <button type="button" className={sent ? "btn-ghost btn-sm text-xs" : "btn-primary btn-sm"} disabled={sendMut.isPending} onClick={() => sendMut.mutate()}>
+            <Send size={12}/> {sendMut.isPending ? "Sending…" : sent ? "Send again" : `Send to ${contracting.email}`}
+          </button>
+        )}
+        {saved.special_terms_send_error && !sent && (
+          <p className="text-xs text-red-600 flex items-start gap-1.5"><AlertTriangle size={12} className="mt-0.5 flex-shrink-0"/>{saved.special_terms_send_error}</p>
+        )}
+      </div>
+
+      {step("c", `${contracting.name}'s answer`, decided)}
+      <div className="pl-8">
+        {!decided ? (
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500">When {contracting.name} replies, record their answer here.</p>
+            <input className="input text-sm" value={note} onChange={e => setNote(e.target.value)} placeholder="Their comments (optional)"/>
+            <div className="flex gap-2">
+              <button className="btn-primary btn-sm" disabled={decideMut.isPending} onClick={() => decideMut.mutate("APPROVED")}><CheckCircle2 size={13}/> Approved</button>
+              <button className="btn-secondary btn-sm text-red-600" disabled={decideMut.isPending} onClick={() => decideMut.mutate("NOT_APPROVED")}><XCircle size={13}/> Not approved</button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn-ghost btn-sm text-xs" disabled={decideMut.isPending}
+            onClick={() => decideMut.mutate(saved.special_terms_status === "APPROVED" ? "NOT_APPROVED" : "APPROVED")}>
+            Change to {saved.special_terms_status === "APPROVED" ? "Not approved" : "Approved"}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function RfpChecklist({ module, rfpId }) {
   const api = rfpApi(module)
   const key = ["rfp-checklist", module, rfpId]
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => api.checklist(rfpId).then(r => r.data) })
   const [f, setF] = useState(null)
-  const [note, setNote] = useState("")
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
 
   useEffect(() => {
@@ -118,11 +224,6 @@ export default function RfpChecklist({ module, rfpId }) {
     mutationFn: () => api.saveChecklist(rfpId, { ...f, site_visit_am_id: f.site_visit_am_id ? Number(f.site_visit_am_id) : null }),
     onSuccess: r => { qc.setQueryData(key, r.data); toast.success("Checklist saved") },
     onError: err => toast.error(apiErrorMessage(err, "Couldn't save the checklist")),
-  })
-  const decideMut = useMutation({
-    mutationFn: decision => api.decideTerms(rfpId, { decision, note }),
-    onSuccess: r => { qc.setQueryData(key, r.data); setNote(""); toast.success("Decision saved — the bid manager has been told") },
-    onError: err => toast.error(apiErrorMessage(err, "Couldn't save the decision")),
   })
   const addPolicy = async label => {
     try {
@@ -167,7 +268,7 @@ export default function RfpChecklist({ module, rfpId }) {
         </Part>
 
         <Part icon={FileSignature} num="2" title="Others — special terms and conditions"
-          hint="Special terms need the bid department's approval. The bid manager is told the outcome."
+          hint="Special terms go to Contracting for approval: attach the documents and send them by email. The bid manager is told the outcome."
           done={f.special_terms_required === false || (f.special_terms_required && !!f.special_terms.trim())}>
           <YesNo value={f.special_terms_required} onChange={v => set("special_terms_required", v)}/>
           {f.special_terms_required && (
@@ -176,34 +277,24 @@ export default function RfpChecklist({ module, rfpId }) {
                 <label className="label">Special terms and conditions <span className="text-red-500">*</span></label>
                 <textarea className="input" rows={4} dir="auto" value={f.special_terms} onChange={e => set("special_terms", e.target.value)}
                   placeholder="e.g. Payment 90 days after acceptance; penalties capped at 10%"/>
-                {termsChanged && saved?.special_terms && <p className="form-hint">Saving changed terms sends them back to the bid department for approval.</p>}
+                {termsChanged && saved?.special_terms && <p className="form-hint">Changed terms have to be sent to Contracting again after you save.</p>}
+                {termsChanged && !saved?.special_terms && <p className="form-hint">Save the checklist, then attach the documents and send them to Contracting.</p>}
               </div>
               {status && (
                 <div className={clsx("flex items-start gap-2 p-3 rounded-xl border text-sm", status.cls)}>
                   <StatusIcon size={16} className="mt-0.5 flex-shrink-0"/>
                   <div>
                     <div className="font-semibold">{status.label}</div>
-                    {saved.special_terms_decider_name && <div className="text-xs opacity-80">By {saved.special_terms_decider_name} · {fmtDT(saved.special_terms_decided_at)}</div>}
-                    {saved.special_terms_note && <div className="text-xs mt-1">Note: {saved.special_terms_note}</div>}
+                    {saved.special_terms_decider_name && <div className="text-xs opacity-80">Recorded by {saved.special_terms_decider_name} · {fmtDT(saved.special_terms_decided_at)}</div>}
+                    {saved.special_terms_status === "PENDING" && !saved.special_terms_sent_at && <div className="text-xs opacity-80">Not sent to Contracting yet</div>}
+                    {saved.special_terms_note && <div className="text-xs mt-1">Comments: {saved.special_terms_note}</div>}
                     <div className="text-xs opacity-80 mt-1">
                       Bid manager: {data.bid_manager ? `${data.bid_manager.full_name}${data.bid_manager.email ? ` (${data.bid_manager.email})` : ""}` : "not chosen yet — set it in the details tab"}
                     </div>
                   </div>
                 </div>
               )}
-              {status && saved.special_terms_status === "PENDING" && data.can_decide && (
-                <div className="p-3 rounded-xl border border-gray-200 space-y-2">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Bid department decision</div>
-                  <input className="input text-sm" value={note} onChange={e => setNote(e.target.value)} placeholder="Note to the bid manager (optional)"/>
-                  <div className="flex gap-2">
-                    <button className="btn-primary btn-sm" disabled={decideMut.isPending} onClick={() => decideMut.mutate("APPROVED")}><CheckCircle2 size={13}/> Approve</button>
-                    <button className="btn-secondary btn-sm text-red-600" disabled={decideMut.isPending} onClick={() => decideMut.mutate("NOT_APPROVED")}><XCircle size={13}/> Not approve</button>
-                  </div>
-                </div>
-              )}
-              {status && saved.special_terms_status === "PENDING" && !data.can_decide && (
-                <p className="text-xs text-gray-500">Only the bid department (administrators and department managers) can approve.</p>
-              )}
+              {status && <ContractingPanel api={api} rfpId={rfpId} data={data} saved={saved} onData={d => qc.setQueryData(key, d)}/>}
             </div>
           )}
         </Part>

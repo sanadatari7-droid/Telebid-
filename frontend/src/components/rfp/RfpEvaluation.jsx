@@ -152,8 +152,8 @@ export default function RfpEvaluation({ module, rfpId }) {
             </div>
             <p className="text-sm text-gray-500 pb-2.5">
               {data.ebitda_min !== null
-                ? <>Minimum to Go: <strong>{data.ebitda_min}%</strong> (set in Company Settings → Pricing Approval Cycle)</>
-                : <>No EBITDA minimum is set, so it doesn't affect the result. Set one in Company Settings → Pricing Approval Cycle.</>}
+                ? <>Minimum to Go: <strong>{data.ebitda_min}%</strong> (set in Company Settings → C · Approvals)</>
+                : <>No EBITDA minimum is set, so it doesn't affect the result. Set one in Company Settings → C · Approvals.</>}
             </p>
           </div>
         </section>

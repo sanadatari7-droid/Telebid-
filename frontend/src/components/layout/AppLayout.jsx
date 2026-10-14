@@ -22,8 +22,8 @@ const NAV_SECTIONS = [
     section: "Modules", sectionTKey: "nav.sectionModules",
     items: [
       { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2,  num: 1 },
-      { label: "RFP ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor,    num: 2 },
-      { label: "RFP Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower, num: 3 },
+      { label: "Bid ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor,    num: 2 },
+      { label: "Bid Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower, num: 3 },
       { label: "EXPRO",            tKey: "nav.exproRequests",   path: "/expro-requests",   icon: University, num: 4 },
     ]
   },
@@ -35,7 +35,7 @@ const NAV_SECTIONS = [
     // knowing which one to use. The route itself still exists, unlinked.
     section: "Pipeline", sectionTKey: "nav.sectionPipeline",
     items: [
-      // One list of every bid from RFP ICT and RFP Telecom (replaces "RFP & Bids" and "All Bids").
+      // One list of every bid from Bid ICT, Bid Telecom and EXPRO (replaces "RFP & Bids" and "All Bids").
       { label: "Bids",         tKey: "nav.bidsMerged",  path: "/all-bids",     icon: Briefcase },
       { label: "EXPRO / Gov",  tKey: "nav.expro",       path: "/expro",        icon: Antenna },
       { label: "ICT Projects", tKey: "nav.ict",         path: "/ict",          icon: Monitor },

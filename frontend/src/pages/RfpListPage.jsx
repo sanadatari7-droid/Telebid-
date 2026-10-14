@@ -116,7 +116,7 @@ export default function RfpListPage({ module }) {
   const { i18n } = useTranslation()
   const lang = i18n.language
   const [params, setParams] = useSearchParams()
-  const tabs = [["rfps", mod.expro ? "Requests" : "Bids"], ...(mod.scope ? [["scope", mod.scope.tab]] : []), ["questions", "Evaluation questions"]]
+  const tabs = [["rfps", "Bids"], ...(mod.scope ? [["scope", mod.scope.tab]] : []), ["questions", "Evaluation questions"]]
   const tab = tabs.some(([id]) => id === params.get("tab")) ? params.get("tab") : "rfps"
   const [q, setQ] = useState("")
   const [filter, setFilter] = useState("all")
@@ -128,7 +128,7 @@ export default function RfpListPage({ module }) {
 
   const deleteMut = useMutation({
     mutationFn: id => api.delete(id),
-    onSuccess: () => { toast.success(`${mod.expro ? "Request" : "Bid"} deleted`); qc.invalidateQueries({ queryKey: ["rfps", module] }) },
+    onSuccess: () => { toast.success("Bid deleted"); qc.invalidateQueries({ queryKey: ["rfps", module] }) },
     onError: err => toast.error(apiErrorMessage(err, `Couldn't delete the ${mod.noun}`)),
   })
 
@@ -152,7 +152,7 @@ export default function RfpListPage({ module }) {
           <h1 className="page-title">{mod.title}</h1>
           <p className="page-subtitle">{mod.subtitle}</p>
         </div>
-        {tab === "rfps" && <button className="btn-primary" onClick={() => navigate(`${mod.path}/new`)}><Plus size={14}/> New {mod.expro ? "request" : "Bid"}</button>}
+        {tab === "rfps" && <button className="btn-primary" onClick={() => navigate(`${mod.path}/new`)}><Plus size={14}/> New Bid</button>}
       </div>
 
       <div className="flex gap-1 border-b border-gray-200">
@@ -200,7 +200,7 @@ export default function RfpListPage({ module }) {
                         <div className="empty-icon mx-auto"><Icon size={28}/></div>
                         <p className="text-sm text-gray-400">
                           {rfps.length ? `No ${mod.nouns} match this search.`
-                            : mod.expro ? "No EXPRO requests yet. Use \"New request\" to add the first one."
+                            : mod.expro ? "No EXPRO bids yet. Use \"New Bid\" to add the first one."
                             : `No ${mod.title} bids yet. Use "New Bid" to add the first one.`}
                         </p>
                       </div>

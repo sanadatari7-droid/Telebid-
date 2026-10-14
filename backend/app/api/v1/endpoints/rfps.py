@@ -173,7 +173,7 @@ MODULES = {
                            BID_LOG_LISTS, BID_LOG_FIELDS),
     Module.telecom: ModuleSpec("TELECOM", "bid", "BID-TEL", "rfp_telecom_number_seq", "TELECOM", 2,
                                {**BID_LOG_LISTS, **TELECOM_LISTS}, BID_LOG_FIELDS | TELECOM_FIELDS),
-    Module.expro: ModuleSpec("EXPRO", "request", "EXPRO", "rfp_expro_number_seq", None, 0,
+    Module.expro: ModuleSpec("EXPRO", "bid", "EXPRO", "rfp_expro_number_seq", None, 0,
                              {**TELECOM_LISTS, "phase": "expro_phase", "status": "expro_status", "reason": "expro_reason"},
                              TELECOM_FIELDS | {"request_date"}, ref_required=True),
 }
