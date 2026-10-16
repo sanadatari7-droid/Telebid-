@@ -2141,3 +2141,8 @@ CREATE TABLE IF NOT EXISTS rfp_checklist_files (
     uploaded_at   TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_rfp_checklist_files_rfp ON rfp_checklist_files(rfp_id);
+
+-- Registration: number of users the company pays for each month (NULL = not set, no limit).
+ALTER TABLE companies
+    ADD COLUMN IF NOT EXISTS licensed_users          INT CHECK (licensed_users IS NULL OR licensed_users >= 1),
+    ADD COLUMN IF NOT EXISTS subscription_started_at TIMESTAMPTZ;

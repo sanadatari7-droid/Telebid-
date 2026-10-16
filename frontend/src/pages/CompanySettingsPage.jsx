@@ -26,6 +26,7 @@ const SECTION_GROUPS = [
     { id:"5", num:"4", label:"Bid Specialists / Managers",         icon:Briefcase },
     { id:"8", num:"5", label:"Bid Evaluations Questions & Value",  icon:ClipboardList },
     { id:"9", num:"6", label:"EXPRO Feasibility Study",            icon:Microscope },
+    { id:"S", num:"7", label:"Users & Subscription",               icon:Users },
   ]},
 ]
 
@@ -37,16 +38,15 @@ function CompanyInfoSection({ part }) {
   const [form, setForm] = useState({})
   useEffect(() => { if (company) setForm({ ...company }) }, [company])
   const fc = e => setForm(p=>({...p,[e.target.name]:e.target.value}))
-  const toggleService = key => setForm(p=>({...p,[key]: !p[key]}))
   const saveMut = useMutation({
     mutationFn: () => {
-      if (part === "profile" && !form.services_ict && !form.services_telecom) {
-        toast.error("Select at least one service offered (ICT, Telecom, or both)")
+      if (part === "profile" && !form.company_type) {
+        toast.error("Choose your company type: Telecom or ICT")
         return Promise.reject(new Error("validation"))
       }
       return companyConfigApi.update(part === "activation" ? { activation_code: form.activation_code || "" } : form)
     },
-    onSuccess: () => { toast.success("Company updated"); qc.invalidateQueries({queryKey:["company-cfg"]}) },
+    onSuccess: () => { toast.success("Company updated"); qc.invalidateQueries({queryKey:["company-cfg"]}); qc.invalidateQueries({queryKey:["setup-status"]}) },
     onError: err => { if (err.message !== "validation") toast.error(err?.response?.data?.detail || "Failed to save") }
   })
 
@@ -117,19 +117,20 @@ function CompanyInfoSection({ part }) {
           </div>
         </div>
 
-        {/* Services offered — ICT / Telecom checkboxes, both = Both */}
+        {/* Company type decides the bid modules: Telecom → Bid ICT, Bid Telecom, EXPRO; ICT → Bid ICT */}
         <div>
-          <label className="label">Services Offered</label>
-          <div className="flex gap-2">
-            {[["services_ict","ICT"],["services_telecom","Telecom"]].map(([key,label]) => (
-              <label key={key} className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer text-sm font-medium",
-                form[key] ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}>
-                <input type="checkbox" className="accent-blue-600" checked={!!form[key]} onChange={()=>toggleService(key)}/>
-                {label}
+          <label className="label">Company type <span className="text-red-500">*</span></label>
+          <div className="grid sm:grid-cols-2 gap-3 max-w-xl">
+            {[["TELECOM","Telecom","Bid ICT, Bid Telecom and EXPRO"],["ICT","ICT","Bid ICT"]].map(([id,label,mods]) => (
+              <label key={id} className={clsx("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer",
+                form.company_type===id ? "bg-blue-50 border-blue-400 text-blue-800" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50")}>
+                <input type="radio" name="company_type" className="accent-blue-600 mt-1" checked={form.company_type===id}
+                  onChange={()=>setForm(p=>({...p, company_type:id}))}/>
+                <span><span className="block text-sm font-semibold">{label}</span><span className="block text-xs opacity-80">Opens {mods}</span></span>
               </label>
             ))}
           </div>
-          <p className="form-hint">Check both to offer ICT and Telecom.</p>
+          {!company?.company_type && <p className="form-hint text-amber-700">The bid modules stay hidden until you choose and save.</p>}
         </div>
       </div>
       )}
@@ -733,6 +734,57 @@ function ExproFeasibilitySection() {
   )
 }
 
+// ── Users & Subscription: how many users the company pays for each month ─────
+function SubscriptionSection() {
+  const qc = useQueryClient()
+  const { data } = useQuery({ queryKey:["subscription"], queryFn:()=>companyConfigApi.subscription().then(r=>r.data) })
+  const [users, setUsers] = useState("")
+  useEffect(() => { if (data) setUsers(data.licensed_users ?? "") }, [data])
+  const saveMut = useMutation({
+    mutationFn: () => companyConfigApi.saveSubscription(Number(users)),
+    onSuccess: r => { toast.success("Number of users saved"); qc.setQueryData(["subscription"], r.data) },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't save the number of users")),
+  })
+  if (!data) return null
+  const n = Number(users)
+  const money = v => `${data.currency} ${Number(v).toLocaleString("en", { maximumFractionDigits: 2 })}`
+  const monthly = data.price_per_user != null && n > 0 ? data.price_per_user * n : null
+  const used = data.licensed_users ? Math.min(100, Math.round(data.active_users / data.licensed_users * 100)) : 0
+  return (
+    <div className="space-y-6">
+      <div className="card space-y-5">
+        <div className="section-title flex items-center gap-2"><Users size={13}/> 7 — Users &amp; Subscription</div>
+        <div className="alert-info text-xs">Your company is charged monthly for the number of users below. Only that many users can be active at once.</div>
+        <div className="grid sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Number of users</label>
+            <input type="number" min="1" className="input tabular-nums" value={users} onChange={e => setUsers(e.target.value)} placeholder="e.g. 10"/>
+          </div>
+          <div>
+            <label className="label">Price per user / month</label>
+            <div className="py-2 text-sm text-gray-900">{data.price_per_user != null ? money(data.price_per_user) : <span className="text-gray-400">To be confirmed</span>}</div>
+          </div>
+          <div>
+            <label className="label">Monthly total</label>
+            <div className="py-1 text-2xl font-bold text-gray-900 tabular-nums">{monthly != null ? money(monthly) : "—"}</div>
+          </div>
+        </div>
+        <div>
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span>Active users: <strong className="text-gray-900">{data.active_users}</strong>{data.licensed_users ? ` of ${data.licensed_users}` : ""}</span>
+            <a href="/users" className="text-blue-600 hover:underline">Manage users</a>
+          </div>
+          {data.licensed_users && <div className="h-2 rounded-full bg-gray-100 overflow-hidden"><div className={clsx("h-full rounded-full", used >= 100 ? "bg-amber-500" : "bg-blue-600")} style={{ width: `${used}%` }}/></div>}
+          {!data.licensed_users && <p className="text-xs text-amber-700">No number of users is set yet — enter it and save.</p>}
+        </div>
+        <button className="btn-primary" disabled={!(n >= 1) || saveMut.isPending || n === data.licensed_users} onClick={() => saveMut.mutate()}>
+          <Check size={13}/> {saveMut.isPending ? "Saving…" : "Save number of users"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function CompanySettingsPage() {
   const [active, setActive] = useState("1")
@@ -780,6 +832,7 @@ export default function CompanySettingsPage() {
           {active==="B" ? <EvaluatorsSection/> : null}
           {active==="C" ? <PricingApprovalSection/> : null}
           {active==="D" ? <BondApprovalSection/> : null}
+          {active==="S" ? <SubscriptionSection/> : null}
         </div>
       </div>
     </div>

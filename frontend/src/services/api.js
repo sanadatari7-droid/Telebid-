@@ -57,6 +57,7 @@ export const authApi = {
   refreshToken: () => api.post("/auth/refresh"),
   register:   d => api.post("/auth/register", d),
   signup:     d => api.post("/auth/signup", d),
+  plan:       () => api.get("/auth/plan"),
   setNewPassword: d => api.post("/auth/set-new-password", d),
 }
 
@@ -432,6 +433,8 @@ export const rfpApi = module => {
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────
 export const companyConfigApi = {
   get:         () => api.get("/company-config"),
+  subscription:     () => api.get("/company-config/subscription"),
+  saveSubscription: n => api.put("/company-config/subscription", { licensed_users: n }),
   update:      d => api.patch("/company-config", d),
   getCurrencies: () => api.get("/company-config/currencies"),
   setupStatus: () => api.get("/company-config/setup-status"),

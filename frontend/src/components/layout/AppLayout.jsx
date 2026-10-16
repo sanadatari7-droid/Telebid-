@@ -14,6 +14,7 @@ import {
 import clsx from "clsx"
 import { useTranslation } from "react-i18next"
 import { setAppLanguage } from "../../i18n"
+import { useCompanyModules } from "../../hooks/useCompanyModules"
 
 const NAV_SECTIONS = [
   // The Dashboard is no longer in the menu; the app opens on Company Settings. (/dashboard still works.)
@@ -22,9 +23,10 @@ const NAV_SECTIONS = [
     section: "Modules", sectionTKey: "nav.sectionModules",
     items: [
       { label: "Company Settings", tKey: "nav.companySettings", path: "/company-settings", icon: Building2,  num: 1 },
-      { label: "Bid ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor,    num: 2 },
-      { label: "Bid Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower, num: 3 },
-      { label: "EXPRO",            tKey: "nav.exproRequests",   path: "/expro-requests",   icon: University, num: 4 },
+      // Shown by company type: Telecom sees all three, ICT sees Bid ICT only, none until the type is chosen.
+      { label: "Bid ICT",          tKey: "nav.rfpIct",          path: "/rfp-ict",          icon: Monitor,    num: 2, module: "ict" },
+      { label: "Bid Telecom",      tKey: "nav.rfpTelecom",      path: "/rfp-telecom",      icon: RadioTower, num: 3, module: "telecom" },
+      { label: "EXPRO",            tKey: "nav.exproRequests",   path: "/expro-requests",   icon: University, num: 4, module: "expro" },
     ]
   },
   {
@@ -36,9 +38,9 @@ const NAV_SECTIONS = [
     section: "Pipeline", sectionTKey: "nav.sectionPipeline",
     items: [
       // One list of every bid from Bid ICT, Bid Telecom and EXPRO (replaces "RFP & Bids" and "All Bids").
-      { label: "Bids",         tKey: "nav.bidsMerged",  path: "/all-bids",     icon: Briefcase },
-      { label: "EXPRO / Gov",  tKey: "nav.expro",       path: "/expro",        icon: Antenna },
-      { label: "ICT Projects", tKey: "nav.ict",         path: "/ict",          icon: Monitor },
+      { label: "Bids",         tKey: "nav.bidsMerged",  path: "/all-bids",     icon: Briefcase, module: "ict" },
+      { label: "EXPRO / Gov",  tKey: "nav.expro",       path: "/expro",        icon: Antenna,   module: "expro" },
+      { label: "ICT Projects", tKey: "nav.ict",         path: "/ict",          icon: Monitor,   module: "ict" },
       { label: "Bonds",        tKey: "nav.bonds",       path: "/bonds",        icon: Landmark },
       { label: "Won Records",  tKey: "nav.wonRecords",  path: "/won-records",  icon: Trophy },
       { label: "Lost Records", tKey: "nav.lostRecords", path: "/lost-records", icon: XCircle },
@@ -177,6 +179,8 @@ function QuickSearch({ onClose }) {
 
 export default function AppLayout() {
   const { user, clearAuth } = useAuthStore()
+  const { modules, companyType, loading: modulesLoading } = useCompanyModules()
+  const visible = item => !item.module || modules.includes(item.module)
   const navigate = useNavigate()
   const location = useLocation()
   const { t, i18n } = useTranslation()
@@ -253,7 +257,7 @@ export default function AppLayout() {
                 </span>
               </div>
             )}
-            {section.items.map(item => {
+            {section.items.filter(visible).map(item => {
               // Match whole path segments, so /expro doesn't light up on /expro-requests.
               const isActive = location.pathname === item.path ||
                 (item.path !== "/" && location.pathname.startsWith(`${item.path}/`))
@@ -280,6 +284,11 @@ export default function AppLayout() {
                 </NavLink>
               )
             })}
+            {si === 0 && !collapsed && !modulesLoading && !companyType && (
+              <NavLink to="/company-settings" className="block mx-1 mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-snug text-amber-800">
+                Choose your company type (Telecom or ICT) in Company Profile to open the bid modules.
+              </NavLink>
+            )}
           </div>
         ))}
       </nav>

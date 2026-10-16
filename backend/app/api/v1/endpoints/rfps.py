@@ -20,7 +20,9 @@ from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_all, fetch_one, fetch_val, execute, require_company
 from app.middleware.auth import get_current_user, require_roles
 
-router = APIRouter(prefix="/rfps", tags=["RFPs (Modules 2–4)"])
+from app.services.plan import module_enabled
+
+router = APIRouter(prefix="/rfps", tags=["RFPs (Modules 2–4)"], dependencies=[Depends(module_enabled)])
 
 
 class Module(str, Enum):

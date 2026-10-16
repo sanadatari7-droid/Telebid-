@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # "not configured" response instead of failing.
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-opus-5-5"
+    # Monthly subscription: price per user (None = not set yet, shown as "to be confirmed")
+    PRICE_PER_USER_MONTHLY: Optional[float] = None
+    BILLING_CURRENCY: str = "SAR"
 
     class Config:
         env_file = ".env"

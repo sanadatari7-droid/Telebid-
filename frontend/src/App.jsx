@@ -40,6 +40,7 @@ const ContentLibraryPage  = lazy(() => import("./pages/ContentLibraryPage"))
 // Modules 2–4 (RFP ICT, RFP Telecom, EXPRO) share these two pages.
 const RfpListPage         = lazy(() => import("./pages/RfpListPage"))
 const RfpEditorPage       = lazy(() => import("./pages/RfpEditorPage"))
+import ModuleGate from "./components/rfp/ModuleGate"
 const AllBidsPage         = lazy(() => import("./pages/AllBidsPage"))
 
 class ErrorBoundary extends Component {
@@ -114,16 +115,16 @@ export default function App() {
           <Route path="rfp-bids"         element={<Page component={OpportunitiesV2Page}/>}/>
           <Route path="company-settings" element={<Page component={CompanySettingsPage}/>}/>
           {/* Modules 2–4 share the RFP pages; the keys keep each module's page state apart. */}
-          <Route path="rfp-ict"                element={<Page key="ict" component={RfpListPage} module="ict"/>}/>
-          <Route path="rfp-ict/new"            element={<Page key="ict" component={RfpEditorPage} module="ict"/>}/>
-          <Route path="rfp-ict/:rfpId"         element={<Page key="ict" component={RfpEditorPage} module="ict"/>}/>
-          <Route path="rfp-telecom"            element={<Page key="telecom" component={RfpListPage} module="telecom"/>}/>
-          <Route path="rfp-telecom/new"        element={<Page key="telecom" component={RfpEditorPage} module="telecom"/>}/>
-          <Route path="rfp-telecom/:rfpId"     element={<Page key="telecom" component={RfpEditorPage} module="telecom"/>}/>
-          <Route path="expro-requests"         element={<Page key="expro" component={RfpListPage} module="expro"/>}/>
-          <Route path="expro-requests/new"     element={<Page key="expro" component={RfpEditorPage} module="expro"/>}/>
-          <Route path="expro-requests/:rfpId"  element={<Page key="expro" component={RfpEditorPage} module="expro"/>}/>
-          <Route path="all-bids"         element={<Page component={AllBidsPage}/>}/>
+          <Route path="rfp-ict"                element={<ModuleGate module="ict"><Page key="ict" component={RfpListPage} module="ict"/></ModuleGate>}/>
+          <Route path="rfp-ict/new"            element={<ModuleGate module="ict"><Page key="ict" component={RfpEditorPage} module="ict"/></ModuleGate>}/>
+          <Route path="rfp-ict/:rfpId"         element={<ModuleGate module="ict"><Page key="ict" component={RfpEditorPage} module="ict"/></ModuleGate>}/>
+          <Route path="rfp-telecom"            element={<ModuleGate module="telecom"><Page key="telecom" component={RfpListPage} module="telecom"/></ModuleGate>}/>
+          <Route path="rfp-telecom/new"        element={<ModuleGate module="telecom"><Page key="telecom" component={RfpEditorPage} module="telecom"/></ModuleGate>}/>
+          <Route path="rfp-telecom/:rfpId"     element={<ModuleGate module="telecom"><Page key="telecom" component={RfpEditorPage} module="telecom"/></ModuleGate>}/>
+          <Route path="expro-requests"         element={<ModuleGate module="expro"><Page key="expro" component={RfpListPage} module="expro"/></ModuleGate>}/>
+          <Route path="expro-requests/new"     element={<ModuleGate module="expro"><Page key="expro" component={RfpEditorPage} module="expro"/></ModuleGate>}/>
+          <Route path="expro-requests/:rfpId"  element={<ModuleGate module="expro"><Page key="expro" component={RfpEditorPage} module="expro"/></ModuleGate>}/>
+          <Route path="all-bids"         element={<ModuleGate module="ict"><Page component={AllBidsPage}/></ModuleGate>}/>
           <Route path="bonds"            element={<Page component={BondsPage}/>}/>
           <Route path="won-records"      element={<Page component={WonRecordsPage}/>}/>
           <Route path="ai-alerts"        element={<Page component={AiAlertsPage}/>}/>

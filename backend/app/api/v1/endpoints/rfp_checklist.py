@@ -20,7 +20,9 @@ from app.middleware.auth import get_current_user
 from app.api.v1.endpoints.rfps import Module, require_rfp
 from app.services.email_service import send_email, smtp_configured
 
-router = APIRouter(prefix="/rfps", tags=["RFP checklist"])
+from app.services.plan import module_enabled
+
+router = APIRouter(prefix="/rfps", tags=["RFP checklist"], dependencies=[Depends(module_enabled)])
 
 MAX_FILE_BYTES = 10 * 1024 * 1024     # per attachment
 MAX_TOTAL_BYTES = 20 * 1024 * 1024    # all attachments of one bid (they go in one email)

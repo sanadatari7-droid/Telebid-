@@ -7,8 +7,9 @@ from app.core.security import (
 )
 from app.core.config import settings
 from app.middleware.auth import require_roles, CurrentUser
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field
+from typing import Literal, Optional
+from app.services.plan import price_per_user, require_free_seat
 from datetime import datetime, timezone, timedelta
 import secrets, re
 
@@ -40,6 +41,10 @@ class TenantSignupRequest(BaseModel):
     admin_email: EmailStr
     admin_password: str
     admin_full_name: str
+    # Registration: company type decides the bid modules (Telecom: all three, ICT: Bid ICT only);
+    # number of users is what the company is charged for each month.
+    company_type: Optional[Literal["TELECOM", "ICT"]] = None
+    licensed_users: Optional[int] = Field(None, ge=1, le=10000)
 
 
 class SetNewPasswordRequest(BaseModel):
@@ -351,9 +356,12 @@ async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
 
     pw_hash = hash_password(body.admin_password)
     async with conn.transaction():
-        company_id = await fetch_val(conn,
-            "INSERT INTO companies (company_code, company_name, is_active) VALUES ($1,$2,TRUE) RETURNING company_id",
-            body.company_code.upper(), body.company_name)
+        company_id = await fetch_val(conn, """
+            INSERT INTO companies (company_code, company_name, is_active, services_ict, services_telecom,
+                                   licensed_users, subscription_started_at)
+            VALUES ($1,$2,TRUE,$3,$4,$5,CASE WHEN $5::int IS NULL THEN NULL ELSE NOW() END) RETURNING company_id""",
+            body.company_code.upper(), body.company_name, body.company_type is not None,
+            body.company_type == "TELECOM", body.licensed_users)
         uid = await fetch_val(conn, """
             INSERT INTO users (username, email, password_hash, full_name, is_active, otp_enabled, company_id)
             VALUES ($1,$2,$3,$4,TRUE,FALSE,$5) RETURNING user_id""",
@@ -384,6 +392,12 @@ async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
     return await _issue_tokens(conn, user)
 
 
+@router.get("/plan")
+async def plan():
+    """Public: the monthly price per user shown on the registration window."""
+    return {"price_per_user": price_per_user(), "currency": settings.BILLING_CURRENCY}
+
+
 # ── Register (authenticated — invites a teammate into YOUR company) ───────────
 
 @router.post("/register", status_code=201)
@@ -396,6 +410,7 @@ async def register(body: RegisterRequest, conn=Depends(get_db),
         body.username, body.email)
     if existing:
         raise HTTPException(status_code=409, detail="Username or email already exists")
+    await require_free_seat(conn, current_user.company_id)
 
     pw_hash = hash_password(body.password)
     await execute(conn, """

@@ -14,7 +14,9 @@ from app.db.postgres import get_db, fetch_all, fetch_one, fetch_val, execute, re
 from app.middleware.auth import get_current_user, require_roles
 from app.api.v1.endpoints.rfps import MODULES, Module, require_rfp
 
-router = APIRouter(prefix="/rfps", tags=["RFP evaluation"])
+from app.services.plan import module_enabled
+
+router = APIRouter(prefix="/rfps", tags=["RFP evaluation"], dependencies=[Depends(module_enabled)])
 
 DEFAULT_PASS_MARK = 60.0
 

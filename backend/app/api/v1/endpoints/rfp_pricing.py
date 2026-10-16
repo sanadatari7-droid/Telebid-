@@ -23,7 +23,9 @@ from app.api.v1.endpoints.rfps import Module, require_rfp
 from app.api.v1.endpoints.rfp_checklist import _tell_bid_manager
 from app.services.email_service import send_email, smtp_configured
 
-router = APIRouter(prefix="/rfps", tags=["RFP pricing approval"])
+from app.services.plan import module_enabled
+
+router = APIRouter(prefix="/rfps", tags=["RFP pricing approval"], dependencies=[Depends(module_enabled)])
 
 # Besides the person assigned to a level (matched by email), these roles may approve.
 APPROVER_ROLES = ("ADMIN", "DEPT_MANAGER", "DIRECTOR")

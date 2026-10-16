@@ -17,7 +17,9 @@ from app.middleware.auth import get_current_user
 from app.api.v1.endpoints.company_config import get_bond_approval_config
 from app.api.v1.endpoints.rfps import MODULES, Module, ModuleSpec
 
-router = APIRouter(prefix="/rfps", tags=["RFP bid bond"])
+from app.services.plan import module_enabled
+
+router = APIRouter(prefix="/rfps", tags=["RFP bid bond"], dependencies=[Depends(module_enabled)])
 
 DEFAULT_VALIDITY_DAYS = 90
 

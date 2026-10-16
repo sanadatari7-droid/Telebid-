@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import clsx from "clsx"
 import { Briefcase, Loader2, Plus, Search, Shield, Star } from "lucide-react"
 import { rfpApi } from "../services/api"
+import { useCompanyModules } from "../hooks/useCompanyModules"
 import { fmt } from "../utils/fmt"
 import { RFP_MODULES, STATUS_STYLE, LOST_STATUSES, optionLabel, formatMoney } from "../utils/rfp"
 
@@ -22,20 +23,24 @@ const STATUS_FILTERS = [
   { id: "closed", label: "Dropped / cancelled", match: s => ["DROPPED", "CANCELLED"].includes(s) },
 ]
 
-function useModuleData(module) {
+function useModuleData(module, enabled) {
   const api = rfpApi(module)
-  const list = useQuery({ queryKey: ["rfps", module], queryFn: () => api.list().then(r => r.data) })
-  const meta = useQuery({ queryKey: ["rfp-lists", module], queryFn: () => api.lists().then(r => r.data) })
-  return { rows: (list.data || []).map(r => ({ ...r, _module: module })), lists: meta.data?.lists || {}, currency: meta.data?.currency, loading: list.isLoading }
+  const list = useQuery({ queryKey: ["rfps", module], queryFn: () => api.list().then(r => r.data), enabled })
+  const meta = useQuery({ queryKey: ["rfp-lists", module], queryFn: () => api.lists().then(r => r.data), enabled })
+  return { rows: enabled ? (list.data || []).map(r => ({ ...r, _module: module })) : [], lists: meta.data?.lists || {},
+           currency: meta.data?.currency, loading: enabled && list.isLoading }
 }
 
 export default function AllBidsPage() {
   const navigate = useNavigate()
   const { i18n } = useTranslation()
   const lang = i18n.language
-  const ict = useModuleData("ict")
-  const tel = useModuleData("telecom")
-  const exp = useModuleData("expro")
+  // Only the modules the company type includes (Telecom: all three, ICT: Bid ICT).
+  const { modules } = useCompanyModules()
+  const shownModules = MODULES.filter(m => modules.includes(m))
+  const ict = useModuleData("ict", modules.includes("ict"))
+  const tel = useModuleData("telecom", modules.includes("telecom"))
+  const exp = useModuleData("expro", modules.includes("expro"))
   const data = { ict, telecom: tel, expro: exp }
   const [q, setQ] = useState("")
   const [mod, setMod] = useState("all")
@@ -56,10 +61,10 @@ export default function AllBidsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Bids</h1>
-          <p className="page-subtitle">Every bid from Bid ICT, Bid Telecom and EXPRO in one list</p>
+          <p className="page-subtitle">{shownModules.length > 1 ? "Every bid from Bid ICT, Bid Telecom and EXPRO in one list" : "Every Bid ICT bid"}</p>
         </div>
         <div className="flex gap-2">
-          {MODULES.map(m => (
+          {shownModules.map(m => (
             <button key={m} className="btn-primary" onClick={() => navigate(`${RFP_MODULES[m].path}/new`)}>
               <Plus size={14}/> New {MOD_LABEL[m]} bid
             </button>
@@ -72,14 +77,14 @@ export default function AllBidsPage() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
           <input className="input pl-9" placeholder="Search client, title, bid number or reference" value={q} onChange={e => setQ(e.target.value)}/>
         </div>
-        <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-          {[["all", "All"], ["ict", "ICT"], ["telecom", "Telecom"], ["expro", "EXPRO"]].map(([id, lbl]) => (
+        {shownModules.length > 1 && <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+          {[["all", "All"], ...shownModules.map(m => [m, MOD_LABEL[m]])].map(([id, lbl]) => (
             <button key={id} onClick={() => setMod(id)}
               className={clsx("px-3 py-1.5 rounded-lg text-sm font-medium", mod === id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-900")}>
               {lbl}
             </button>
           ))}
-        </div>
+        </div>}
         <div className="flex flex-wrap gap-1.5">
           {STATUS_FILTERS.map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)}

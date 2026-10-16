@@ -4,6 +4,7 @@ from app.db.postgres import get_db, fetch_all, fetch_one, fetch_page, execute, f
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
 from app.core.security import hash_password
 from pydantic import BaseModel
+from app.services.plan import require_free_seat
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -76,6 +77,7 @@ async def create_user(body: UserCreate, conn=Depends(get_db), current_user=Depen
     existing = await fetch_one(conn, "SELECT user_id FROM users WHERE username=$1 OR email=$2", body.username, body.email)
     if existing:
         raise HTTPException(status_code=409, detail="Username or email already exists")
+    await require_free_seat(conn, company_id)
     pw_hash = hash_password(body.password)
     await execute(conn,
         "INSERT INTO users (username,email,password_hash,full_name,dept_id,job_title,phone,created_by,company_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
@@ -108,6 +110,8 @@ async def get_user(user_id: int, conn=Depends(get_db), current_user=Depends(requ
 async def update_user(user_id: int, body: UserUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
     allowed = ["full_name","email","job_title","phone","dept_id","is_active"]
+    if body.is_active and not await fetch_val(conn, "SELECT is_active FROM users WHERE user_id=$1 AND company_id=$2", user_id, company_id):
+        await require_free_seat(conn, company_id)
     updates, args = [], []
     for k, v in body.dict(exclude_none=True).items():
         if k in allowed:
@@ -165,6 +169,8 @@ async def deactivate_user(user_id: int, conn=Depends(get_db), current_user=Depen
 @router.patch("/{user_id}/activate")
 async def activate_user(user_id: int, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
+    if not await fetch_val(conn, "SELECT is_active FROM users WHERE user_id=$1 AND company_id=$2", user_id, company_id):
+        await require_free_seat(conn, company_id)
     result = await execute(conn, "UPDATE users SET is_active=TRUE WHERE user_id=$1 AND company_id=$2", user_id, company_id)
     if result == "UPDATE 0": raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Activated"}

@@ -1,15 +1,21 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuthStore } from "../store/authStore"
 import { authApi } from "../services/api"
 import { apiErrorMessage } from "../utils/apiError"
-import { Eye, EyeOff, Zap, Shield, Lock, User, Mail, Building2, Hash, AlertCircle, Loader2 } from "lucide-react"
+import { Eye, EyeOff, Zap, Shield, Lock, User, Mail, Building2, Hash, AlertCircle, Loader2, RadioTower, Monitor, Users } from "lucide-react"
 import toast from "react-hot-toast"
 
 const INITIAL = {
-  company_name: "", company_code: "",
+  company_name: "", company_code: "", company_type: "", licensed_users: "5",
   admin_full_name: "", admin_username: "", admin_email: "", admin_password: "",
 }
+
+// Company type decides the bid modules the company gets.
+const TYPES = [
+  { id: "TELECOM", icon: RadioTower, label: "Telecom", modules: "Bid ICT, Bid Telecom and EXPRO" },
+  { id: "ICT",     icon: Monitor,    label: "ICT",     modules: "Bid ICT" },
+]
 
 export default function SignupPage() {
   const navigate = useNavigate()
@@ -18,6 +24,11 @@ export default function SignupPage() {
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [plan, setPlan] = useState(null)
+  useEffect(() => { authApi.plan().then(r => setPlan(r.data)).catch(() => {}) }, [])
+  const users = parseInt(form.licensed_users, 10)
+  const monthly = plan?.price_per_user != null && users > 0 ? plan.price_per_user * users : null
+  const money = v => `${plan?.currency || ""} ${Number(v).toLocaleString("en", { maximumFractionDigits: 2 })}`.trim()
 
   const fc = e => {
     setForm(p => ({ ...p, [e.target.name]: e.target.value }))
@@ -28,6 +39,8 @@ export default function SignupPage() {
     e.preventDefault()
     if (!form.company_name.trim()) { setError("Please enter your company name"); return }
     if (!form.company_code.trim()) { setError("Please choose a company code"); return }
+    if (!form.company_type) { setError("Please choose your company type: Telecom or ICT"); return }
+    if (!(users >= 1)) { setError("Please enter how many users will use TeleBid (at least 1)"); return }
     if (!form.admin_username.trim()) { setError("Please choose a username"); return }
     if (!form.admin_email.trim()) { setError("Please enter your email"); return }
     if (!form.admin_full_name.trim()) { setError("Please enter your full name"); return }
@@ -40,6 +53,8 @@ export default function SignupPage() {
       const { data } = await authApi.signup({
         company_name: form.company_name.trim(),
         company_code: form.company_code.trim().toUpperCase(),
+        company_type: form.company_type,
+        licensed_users: users,
         admin_username: form.admin_username.trim(),
         admin_email: form.admin_email.trim(),
         admin_password: form.admin_password,
@@ -83,6 +98,7 @@ export default function SignupPage() {
               { icon: Shield, text: "Your own isolated company workspace" },
               { icon: Zap,    text: "You become the company Administrator" },
               { icon: Lock,   text: "Invite teammates once you're set up" },
+              { icon: Users,  text: "Pay monthly for the users you need" },
             ].map(({ icon: Icon, text }) => (
               <div key={text} className="flex items-center gap-3 text-blue-100">
                 <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -108,7 +124,7 @@ export default function SignupPage() {
           </div>
 
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Create your company workspace</h1>
-          <p className="text-gray-400 text-sm mb-8">Start your free TeleBid Enterprise account</p>
+          <p className="text-gray-400 text-sm mb-8">Register your company: its type, how many users, and your admin account</p>
 
           {error && (
             <div className="flex items-start gap-2 p-3.5 bg-red-50 border border-red-200 rounded-xl mb-5 text-red-700 text-sm">
@@ -136,6 +152,36 @@ export default function SignupPage() {
                     placeholder="ACME" value={form.company_code} onChange={fc}/>
                 </div>
               </div>
+            </div>
+
+            <div>
+              <label className="label">Company type</label>
+              <div className="grid grid-cols-2 gap-3">
+                {TYPES.map(({ id, icon: Icon, label, modules }) => (
+                  <button type="button" key={id} onClick={() => { setForm(p => ({ ...p, company_type: id })); setError("") }}
+                    className={`text-left p-3 rounded-xl border transition-colors ${form.company_type === id ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : "border-gray-200 bg-white hover:bg-gray-50"}`}>
+                    <div className="flex items-center gap-2 font-semibold text-gray-900 text-sm"><Icon size={15} className="text-blue-600"/> {label}</div>
+                    <div className="text-xs text-gray-500 mt-1">You get {modules}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="label">Number of users</label>
+              <div className="flex items-center gap-3">
+                <div className="relative w-36">
+                  <Users size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"/>
+                  <input name="licensed_users" type="number" min="1" max="10000" className="input pl-10 tabular-nums"
+                    value={form.licensed_users} onChange={fc}/>
+                </div>
+                <div className="text-sm text-gray-600">
+                  {monthly != null
+                    ? <><strong className="text-gray-900">{money(monthly)}</strong> / month <span className="text-gray-400">({money(plan.price_per_user)} per user)</span></>
+                    : <span className="text-gray-400">Charged monthly per user</span>}
+                </div>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">How many people in your company will use TeleBid. You can change it later.</p>
             </div>
 
             <div className="border-t border-gray-100 pt-4">

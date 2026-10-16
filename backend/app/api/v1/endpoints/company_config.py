@@ -1,9 +1,10 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_all, fetch_one, execute, require_company
 from app.middleware.auth import get_current_user, require_roles, CurrentUser
+from app.services.plan import company_type, modules_for, seats
 
 router = APIRouter(prefix="/company-config", tags=["Company Config"])
 
@@ -88,11 +89,36 @@ class CompanyUpdate(BaseModel):
     currency_decimals: Optional[int] = None
     services_ict: Optional[bool] = None
     services_telecom: Optional[bool] = None
+    # Telecom companies see Bid ICT, Bid Telecom and EXPRO; ICT companies see Bid ICT only.
+    company_type: Optional[Literal["TELECOM", "ICT"]] = None
+
+class SubscriptionUpdate(BaseModel):
+    licensed_users: int = Field(..., ge=1, le=10000)
 
 @router.get("")
 async def get_company(conn=Depends(get_db), current_user=Depends(get_current_user)):
     company_id = require_company(current_user)
-    return await fetch_one(conn, "SELECT * FROM companies WHERE company_id=$1", company_id)
+    row = await fetch_one(conn, "SELECT * FROM companies WHERE company_id=$1", company_id)
+    if not row:
+        return row
+    ctype = company_type(row)
+    return {**row, "company_type": ctype, "modules": modules_for(ctype)}
+
+@router.get("/subscription")
+async def get_subscription(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    return await seats(conn, require_company(current_user))
+
+@router.put("/subscription")
+async def save_subscription(body: SubscriptionUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
+    active = (await seats(conn, company_id))["active_users"]
+    if body.licensed_users < active:
+        raise HTTPException(status_code=400,
+            detail=f"You have {active} active users — deactivate some in User Management before going down to {body.licensed_users}")
+    await execute(conn, """
+        UPDATE companies SET licensed_users=$1, subscription_started_at=COALESCE(subscription_started_at, NOW())
+        WHERE company_id=$2""", body.licensed_users, company_id)
+    return await seats(conn, company_id)
 
 @router.get("/currencies")
 async def list_currencies(conn=Depends(get_db), current_user=Depends(get_current_user)):
@@ -102,6 +128,10 @@ async def list_currencies(conn=Depends(get_db), current_user=Depends(get_current
 async def update_company(body: CompanyUpdate, conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
     company_id = require_company(current_user)
     provided = body.dict(exclude_unset=True)
+    if body.company_type:
+        body.services_ict = True
+        body.services_telecom = body.company_type == "TELECOM"
+        provided.update(services_ict=True, services_telecom=body.services_telecom)
 
     if "currency_decimals" in provided and provided["currency_decimals"] not in (2, 3, 4):
         raise HTTPException(status_code=400, detail="Currency decimals must be 2, 3, or 4")
@@ -281,7 +311,7 @@ async def setup_status(conn=Depends(get_db), current_user=Depends(get_current_us
                (SELECT COUNT(*) FROM rfp_eval_questions WHERE company_id=$1 AND is_active AND module='TELECOM') AS q_tel,
                (SELECT COUNT(*) FROM rfp_eval_questions WHERE company_id=$1 AND is_active AND module='EXPRO') AS q_expro""")
     steps = [
-        ("profile", "Company profile: initials, country, currency and services",
+        ("profile", "Company profile: company type (Telecom or ICT), initials, country and currency",
          bool(co and co["company_initials"] and co["country"] and co["currency_id"] and (co["services_ict"] or co["services_telecom"])),
          "/company-settings"),
         ("evaluators", "Add evaluators (name, email, title)", counts["evaluators"] > 0, "/company-settings"),
@@ -293,4 +323,8 @@ async def setup_status(conn=Depends(get_db), current_user=Depends(get_current_us
         ("q_tel", "Bid Telecom: set the evaluation questions", counts["q_tel"] > 0, "/rfp-telecom?tab=questions"),
         ("q_expro", "EXPRO: set the evaluation questions", counts["q_expro"] > 0, "/expro-requests?tab=questions"),
     ]
+    # Only the modules of the company type; none until it is chosen.
+    modules = modules_for(company_type(co))
+    steps = [st for st in steps if st[0] not in ("q_ict", "q_tel", "q_expro")
+             or {"q_ict": "ict", "q_tel": "telecom", "q_expro": "expro"}[st[0]] in modules]
     return {"steps": [{"id": i, "label": l, "done": d, "link": k} for i, l, d, k in steps]}
