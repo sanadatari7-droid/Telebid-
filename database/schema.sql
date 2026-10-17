@@ -2146,3 +2146,8 @@ CREATE INDEX IF NOT EXISTS idx_rfp_checklist_files_rfp ON rfp_checklist_files(rf
 ALTER TABLE companies
     ADD COLUMN IF NOT EXISTS licensed_users          INT CHECK (licensed_users IS NULL OR licensed_users >= 1),
     ADD COLUMN IF NOT EXISTS subscription_started_at TIMESTAMPTZ;
+
+-- Company logo (Company Settings -> Company Profile), kept in the database.
+ALTER TABLE companies
+    ADD COLUMN IF NOT EXISTS logo_data BYTEA,
+    ADD COLUMN IF NOT EXISTS logo_type VARCHAR(30);

@@ -14,7 +14,7 @@ import {
 import clsx from "clsx"
 import { useTranslation } from "react-i18next"
 import { setAppLanguage } from "../../i18n"
-import { useCompanyModules } from "../../hooks/useCompanyModules"
+import { useCompanyModules, useCompanyLogo } from "../../hooks/useCompanyModules"
 
 const NAV_SECTIONS = [
   // The Dashboard is no longer in the menu; the app opens on Company Settings. (/dashboard still works.)
@@ -180,6 +180,7 @@ function QuickSearch({ onClose }) {
 export default function AppLayout() {
   const { user, clearAuth } = useAuthStore()
   const { modules, companyType, loading: modulesLoading } = useCompanyModules()
+  const logo = useCompanyLogo()
   const visible = item => !item.module || modules.includes(item.module)
   const navigate = useNavigate()
   const location = useLocation()
@@ -220,9 +221,13 @@ export default function AppLayout() {
     <>
       {/* Logo */}
       <div className={clsx("flex items-center gap-3 px-4 py-5 flex-shrink-0", collapsed && "justify-center")}>
-        <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
-          <Zap size={18} className="text-white"/>
-        </div>
+        {logo ? (
+          <img src={logo} alt="Company logo" className="w-9 h-9 rounded-xl object-contain bg-white border border-gray-100 flex-shrink-0"/>
+        ) : (
+          <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
+            <Zap size={18} className="text-white"/>
+          </div>
+        )}
         {!collapsed && (
           <div>
             <div className="font-display font-semibold text-gray-900 text-sm leading-tight">TeleBid</div>

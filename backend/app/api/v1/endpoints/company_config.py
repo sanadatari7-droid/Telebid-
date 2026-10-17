@@ -1,5 +1,6 @@
 import re
-from fastapi import APIRouter, Depends, HTTPException
+import base64
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from app.db.postgres import get_db, fetch_all, fetch_one, execute, require_company
@@ -102,7 +103,47 @@ async def get_company(conn=Depends(get_db), current_user=Depends(get_current_use
     if not row:
         return row
     ctype = company_type(row)
+    row = {k: v for k, v in row.items() if k not in ("logo_data", "logo_type")}
     return {**row, "company_type": ctype, "modules": modules_for(ctype)}
+
+# Company logo: stored in the database (the server has no lasting disk) and handed to the
+# browser as a data URL, so it shows without a separate signed-in image request.
+LOGO_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_LOGO_BYTES = 1024 * 1024
+
+@router.get("/logo")
+async def get_logo(conn=Depends(get_db), current_user=Depends(get_current_user)):
+    row = await fetch_one(conn, "SELECT logo_data, logo_type FROM companies WHERE company_id=$1", require_company(current_user))
+    if not row or not row["logo_data"]:
+        return {"data_url": None}
+    return {"data_url": f"data:{row['logo_type']};base64,{base64.b64encode(bytes(row['logo_data'])).decode()}"}
+
+@router.post("/logo")
+async def upload_logo(file: UploadFile = File(...), conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    company_id = require_company(current_user)
+    data = await file.read(MAX_LOGO_BYTES + 1)
+    kind = _image_kind(data)
+    if kind is None:
+        raise HTTPException(status_code=400, detail="Upload a PNG, JPG or WebP image")
+    if len(data) > MAX_LOGO_BYTES:
+        raise HTTPException(status_code=400, detail="The logo can be at most 1 MB")
+    await execute(conn, "UPDATE companies SET logo_data=$1, logo_type=$2 WHERE company_id=$3", data, kind, company_id)
+    return await get_logo(conn, current_user)
+
+@router.delete("/logo")
+async def delete_logo(conn=Depends(get_db), current_user=Depends(require_roles("ADMIN"))):
+    await execute(conn, "UPDATE companies SET logo_data=NULL, logo_type=NULL WHERE company_id=$1", require_company(current_user))
+    return {"data_url": None}
+
+def _image_kind(data: bytes):
+    """The image type from the file's own bytes (not its name), so only real images are kept."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 @router.get("/subscription")
 async def get_subscription(conn=Depends(get_db), current_user=Depends(get_current_user)):

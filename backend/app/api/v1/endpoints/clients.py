@@ -66,6 +66,24 @@ async def update_client(client_id: int, body: ClientIn, conn=Depends(get_db), cu
     return await fetch_one(conn, "SELECT * FROM clients WHERE client_id=$1", client_id)
 
 
+class TranslateAnyIn(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000)
+    kind: translator.TextKind
+    # Target language; left out = the other language from the one the text is written in.
+    to: Optional[translator.Language] = None
+
+
+@router.post("/translate")
+async def translate_any(body: TranslateAnyIn, current_user=Depends(get_current_user)):
+    """English -> Arabic or Arabic -> English, whichever the text needs."""
+    text = body.text.strip()
+    to = body.to or ("en" if translator.detect_language(text) == "ar" else "ar")
+    try:
+        return {"text": await translator.translate(text, body.kind, to), "to": to}
+    except translator.TranslationUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @router.post("/translate/arabic")
 async def translate_arabic(body: TranslateIn, current_user=Depends(get_current_user)):
     try:

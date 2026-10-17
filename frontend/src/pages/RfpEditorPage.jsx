@@ -16,6 +16,7 @@ import RfpBidBond from "../components/rfp/RfpBidBond"
 import RfpChecklist from "../components/rfp/RfpChecklist"
 import RfpPricing from "../components/rfp/RfpPricing"
 import { useAuthStore } from "../store/authStore"
+import { useBilingualPair } from "../hooks/useBilingualPair"
 
 // bid_bond_required starts empty (null) so Yes or No has to be chosen before moving on.
 const EMPTY = {
@@ -166,51 +167,32 @@ function AddInline({ label, placeholder, onAdd, children }) {
 
 const isLink = v => /^https?:\/\//i.test((v || "").trim())
 
-// ── New client (English with automatic Arabic) ────────────────────────────────
-// Once the translation service says it's unavailable, stop asking for the rest of the visit.
-let translationDown = false
-
-function useArabicAutofill(kind) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(translationDown ? "Automatic Arabic isn't available right now. Please type it." : "")
-  const run = async (english, currentArabic, wasAuto, setArabic) => {
-    const text = (english || "").trim()
-    if (!text || (currentArabic && !wasAuto) || translationDown) return
-    setBusy(true); setError("")
-    try { setArabic((await clientsApi.translate(text, kind)).data.arabic) }
-    catch (err) {
-      if (err.response?.status === 503) translationDown = true
-      setError("Automatic Arabic isn't available right now. Please type it.")
-    }
-    finally { setBusy(false) }
-  }
-  return { busy, error, run }
-}
-
+// ── New client (English and Arabic, each filled in from the other) ────────────
 function NewClientForm({ noun, onCreated, onCancel }) {
   const qc = useQueryClient()
   const [f, setF] = useState({ name_en: "", name_ar: "", billing_address_en: "", billing_address_ar: "", is_strategic: false })
-  const [auto, setAuto] = useState({ name: false, address: false })
-  const nameTr = useArabicAutofill("name")
-  const addrTr = useArabicAutofill("address")
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  const nameTr = useBilingualPair("name", { en: f.name_en, ar: f.name_ar, setEn: v => set("name_en", v), setAr: v => set("name_ar", v) })
+  const addrTr = useBilingualPair("address", { en: f.billing_address_en, ar: f.billing_address_ar,
+    setEn: v => set("billing_address_en", v), setAr: v => set("billing_address_ar", v) })
   const saveMut = useMutation({
     mutationFn: () => clientsApi.create(f),
     onSuccess: r => { toast.success(`${noun} added`); qc.invalidateQueries({ queryKey: ["clients"] }); onCreated(r.data) },
     onError: err => toast.error(apiErrorMessage(err, `Couldn't add the ${noun.toLowerCase()}`)),
   })
-  const pair = (label, kEn, kAr, autoKey, tr, multiline) => {
+  const pair = (label, kEn, kAr, tr, multiline) => {
     const Input = multiline ? "textarea" : "input"
+    const spin = side => tr.busy === side && <Loader2 size={11} className="animate-spin text-blue-500"/>
+    const hint = side => tr.busy === side ? "Translating…" : tr.down ? `Type the ${side === "ar" ? "Arabic" : "English"}` : "Type here, or it fills in from the other box"
     return (
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label={`${label} (English)`} required>
-          <Input className="input" rows={multiline ? 2 : undefined} value={f[kEn]} onChange={e => set(kEn, e.target.value)}
-            onBlur={() => tr.run(f[kEn], f[kAr], auto[autoKey], v => { set(kAr, v); setAuto(a => ({ ...a, [autoKey]: true })) })}/>
+        <Field label={<span className="flex items-center gap-1.5">{label} (English){spin("en")}</span>} required>
+          <Input className="input" rows={multiline ? 2 : undefined} value={f[kEn]} placeholder={hint("en")}
+            onChange={e => { set(kEn, e.target.value); tr.typedEn() }} onBlur={tr.blurEn}/>
         </Field>
-        <Field label={<span className="flex items-center gap-1.5">{label} (Arabic){tr.busy && <Loader2 size={11} className="animate-spin text-blue-500"/>}</span>} required>
-          <Input className="input" dir="rtl" rows={multiline ? 2 : undefined} value={f[kAr]}
-            placeholder={tr.busy ? "Translating…" : translationDown ? "Type the Arabic" : "Filled in automatically"}
-            onChange={e => { set(kAr, e.target.value); setAuto(a => ({ ...a, [autoKey]: false })) }}/>
+        <Field label={<span className="flex items-center gap-1.5">{label} (Arabic){spin("ar")}</span>} required>
+          <Input className="input" dir="rtl" rows={multiline ? 2 : undefined} value={f[kAr]} placeholder={hint("ar")}
+            onChange={e => { set(kAr, e.target.value); tr.typedAr() }} onBlur={tr.blurAr}/>
           {tr.error && <p className="text-xs text-amber-600 mt-1">{tr.error}</p>}
         </Field>
       </div>
@@ -220,10 +202,10 @@ function NewClientForm({ noun, onCreated, onCancel }) {
   return (
     <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-3">
       <div className="flex items-center gap-2 text-xs text-blue-700">
-        <Languages size={13}/> {translationDown ? "Type the name and billing address in English and Arabic." : "Type in English. The Arabic fills in when you leave the field, and you can correct it."}
+        <Languages size={13}/> {nameTr.down ? "Type the name and billing address in English and Arabic." : "Type in English or Arabic. The other language fills in when you leave the field, and you can correct it."}
       </div>
-      {pair(`${noun} name`, "name_en", "name_ar", "name", nameTr)}
-      {pair("Billing address", "billing_address_en", "billing_address_ar", "address", addrTr, true)}
+      {pair(`${noun} name`, "name_en", "name_ar", nameTr)}
+      {pair("Billing address", "billing_address_en", "billing_address_ar", addrTr, true)}
       <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer w-fit">
         <input type="checkbox" className="accent-blue-600" checked={f.is_strategic} onChange={e => set("is_strategic", e.target.checked)}/>
         Strategic account

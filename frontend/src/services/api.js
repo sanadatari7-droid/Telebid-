@@ -390,6 +390,7 @@ export const clientsApi = {
   create:    d => api.post("/clients", d),
   update:    (id, d) => api.put(`/clients/${id}`, d),
   translate: (text, kind) => api.post("/translate/arabic", { text, kind }),
+  translateAny: (text, kind, to) => api.post("/translate", { text, kind, to }),
 }
 // module: "ict" | "telecom" | "expro" — the three modules share one API.
 export const rfpApi = module => {
@@ -433,6 +434,9 @@ export const rfpApi = module => {
 // ── COMPANY CONFIG ────────────────────────────────────────────────────────────
 export const companyConfigApi = {
   get:         () => api.get("/company-config"),
+  getLogo:     () => api.get("/company-config/logo"),
+  uploadLogo:  file => { const fd = new FormData(); fd.append("file", file); return api.post("/company-config/logo", fd, { headers: { "Content-Type": "multipart/form-data" } }) },
+  deleteLogo:  () => api.delete("/company-config/logo"),
   subscription:     () => api.get("/company-config/subscription"),
   saveSubscription: n => api.put("/company-config/subscription", { licensed_users: n }),
   update:      d => api.patch("/company-config", d),

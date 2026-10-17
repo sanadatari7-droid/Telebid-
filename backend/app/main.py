@@ -835,6 +835,13 @@ async def run_migrations():
             ADD COLUMN IF NOT EXISTS licensed_users          INT CHECK (licensed_users IS NULL OR licensed_users >= 1),
             ADD COLUMN IF NOT EXISTS subscription_started_at TIMESTAMPTZ;
         """,
+        # ── Company logo ──
+        """
+        -- Company logo (Company Settings -> Company Profile), kept in the database.
+        ALTER TABLE companies
+            ADD COLUMN IF NOT EXISTS logo_data BYTEA,
+            ADD COLUMN IF NOT EXISTS logo_type VARCHAR(30);
+        """,
     ]
 
     async with pool.acquire() as conn:

@@ -3,12 +3,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { companyConfigApi, empApi, oppsV2Api, usersApi } from "../services/api"
 import { COUNTRIES } from "../constants/countries"
 import SetupChecklist from "../components/dashboard/SetupChecklist"
+import { useBilingualPair } from "../hooks/useBilingualPair"
+import { useCompanyLogo } from "../hooks/useCompanyModules"
 import { apiErrorMessage } from "../utils/apiError"
 import toast from "react-hot-toast"
 import clsx from "clsx"
 import {
   Building2, Key, Hash, Users, Briefcase, TrendingUp, Shield,
-  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck, Send
+  ClipboardList, Microscope, Plus, Trash2, Check, X, Pencil, ChevronRight, Globe2, UserCheck, Send,
+  Upload, Image as ImageIcon
 } from "lucide-react"
 
 // Module 1 (Company) sub-modules first, then the remaining settings.
@@ -30,6 +33,42 @@ const SECTION_GROUPS = [
   ]},
 ]
 
+// Company logo: shown at the top of the menu for everyone in the company.
+function LogoUpload() {
+  const qc = useQueryClient()
+  const logo = useCompanyLogo()
+  const ref = React.useRef(null)
+  const done = msg => r => { qc.setQueryData(["company-logo"], r.data); toast.success(msg) }
+  const upMut = useMutation({
+    mutationFn: file => companyConfigApi.uploadLogo(file),
+    onSuccess: done("Logo uploaded"),
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't upload the logo")),
+    onSettled: () => { if (ref.current) ref.current.value = "" },
+  })
+  const delMut = useMutation({ mutationFn: () => companyConfigApi.deleteLogo(), onSuccess: done("Logo removed") })
+  return (
+    <div>
+      <label className="label">Company logo</label>
+      <div className="flex items-center gap-4">
+        <div className="w-20 h-20 rounded-xl border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center overflow-hidden flex-shrink-0">
+          {logo ? <img src={logo} alt="Company logo" className="w-full h-full object-contain"/> : <ImageIcon size={22} className="text-gray-300"/>}
+        </div>
+        <div className="space-y-1.5">
+          <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+            onChange={e => e.target.files[0] && upMut.mutate(e.target.files[0])}/>
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary btn-sm" disabled={upMut.isPending} onClick={() => ref.current?.click()}>
+              <Upload size={12}/> {upMut.isPending ? "Uploading…" : logo ? "Change logo" : "Upload logo"}
+            </button>
+            {logo && <button type="button" className="btn-ghost btn-sm text-red-500" disabled={delMut.isPending} onClick={() => delMut.mutate()}><Trash2 size={12}/> Remove</button>}
+          </div>
+          <p className="form-hint">PNG, JPG or WebP, up to 1 MB. A square image looks best. It shows at the top of the menu.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Section 1 & 2: Company Info ───────────────────────────────────────────────
 function CompanyInfoSection({ part }) {
   const qc = useQueryClient()
@@ -38,6 +77,9 @@ function CompanyInfoSection({ part }) {
   const [form, setForm] = useState({})
   useEffect(() => { if (company) setForm({ ...company }) }, [company])
   const fc = e => setForm(p=>({...p,[e.target.name]:e.target.value}))
+  // Company name: type it in English or Arabic and the other fills in.
+  const nameTr = useBilingualPair("name", { en: form.company_name, ar: form.company_name_ar,
+    setEn: v => setForm(p=>({...p, company_name:v})), setAr: v => setForm(p=>({...p, company_name_ar:v})) })
   const saveMut = useMutation({
     mutationFn: () => {
       if (part === "profile" && !form.company_type) {
@@ -55,14 +97,18 @@ function CompanyInfoSection({ part }) {
       {part === "profile" && (
       <div className="card space-y-4">
         <div className="section-title flex items-center gap-2"><Building2 size={13}/> A — Company Profile</div>
+        <LogoUpload/>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Company Name (English)</label>
-            <input name="company_name" className="input" value={form.company_name||""} onChange={fc}/>
+            <input name="company_name" className="input" value={form.company_name||""} onChange={e=>{fc(e); nameTr.typedEn()}} onBlur={nameTr.blurEn}
+              placeholder={nameTr.busy==="en" ? "Translating…" : ""}/>
           </div>
           <div>
             <label className="label">Company Name (Arabic)</label>
-            <input name="company_name_ar" className="input" value={form.company_name_ar||""} onChange={fc} dir="rtl"/>
+            <input name="company_name_ar" className="input" value={form.company_name_ar||""} onChange={e=>{fc(e); nameTr.typedAr()}} onBlur={nameTr.blurAr} dir="rtl"
+              placeholder={nameTr.busy==="ar" ? "Translating…" : "Type here, or it fills in from the English"}/>
+            {nameTr.error && <p className="text-xs text-amber-600 mt-1">{nameTr.error}</p>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
