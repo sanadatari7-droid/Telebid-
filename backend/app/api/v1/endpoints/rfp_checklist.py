@@ -252,7 +252,7 @@ async def send_terms_to_contracting(module: Module, rfp_id: int, conn=Depends(ge
     if not cfg or not cfg["contracting_email"]:
         error = "No Contracting email is set (Company Settings → C · Approvals), so nothing was sent"
     elif not await smtp_configured(company_id):
-        error = "Email isn't set up yet (System Settings → Email), so nothing was sent"
+        error = "Email isn't set up or is switched off (System Settings → Email), so nothing was sent"
     else:
         info = await fetch_one(conn, """
             SELECT r.rfp_number, r.rfp_title, r.rfp_ref, r.submission_date, c.name_en, bm.full_name AS bm_name

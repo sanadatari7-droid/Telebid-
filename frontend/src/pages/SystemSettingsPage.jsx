@@ -19,6 +19,65 @@ const CATEGORIES = [
   { key:"DISPLAY",     label:"Display",         icon:Globe },
 ]
 
+// A slide switch: on (blue, knob right) / off (grey, knob left).
+function Switch({ checked, onChange, disabled, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={clsx("relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2",
+        checked ? "bg-green-500" : "bg-gray-300", disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer")}>
+      <span className={clsx("inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform",
+        checked ? "translate-x-6" : "translate-x-1")}/>
+    </button>
+  )
+}
+
+// Email on/off and whether the app can reach the mail server.
+function EmailStatusCard() {
+  const qc = useQueryClient()
+  const { data: st } = useQuery({ queryKey: ["email-status"], queryFn: () => settingsApi.emailStatus().then(r => r.data) })
+  const put = r => qc.setQueryData(["email-status"], r.data)
+  const switchMut = useMutation({
+    mutationFn: on => settingsApi.setEmailEnabled(on),
+    onSuccess: (r, on) => { put(r); toast.success(on ? "Email sending turned on" : "Email sending turned off") },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't change it")),
+  })
+  const checkMut = useMutation({
+    mutationFn: () => settingsApi.emailCheck(),
+    onSuccess: r => { put(r); r.data.connected ? toast.success("Connected to the mail server") : toast.error("Couldn't connect to the mail server") },
+    onError: err => toast.error(apiErrorMessage(err, "Couldn't check the connection")),
+  })
+  if (!st) return null
+  const status = !st.configured ? { label: "Not set up", cls: "bg-gray-100 text-gray-600", dot: "bg-gray-400" }
+    : !st.enabled ? { label: "Disabled", cls: "bg-gray-100 text-gray-600", dot: "bg-gray-400" }
+    : st.connected === true ? { label: "Connected", cls: "bg-green-100 text-green-700", dot: "bg-green-500" }
+    : st.connected === false ? { label: "Not connected", cls: "bg-red-100 text-red-700", dot: "bg-red-500" }
+    : { label: "Enabled — not checked yet", cls: "bg-amber-100 text-amber-800", dot: "bg-amber-500" }
+  return (
+    <div className="mb-5 p-4 rounded-xl border border-gray-200 bg-white space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Switch checked={st.enabled} disabled={!st.configured || st.server_wide || switchMut.isPending} label="Email sending"
+          onChange={on => switchMut.mutate(on)}/>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-gray-900">Email sending {st.enabled ? "on" : "off"}</div>
+          <div className="text-xs text-gray-500 truncate">
+            {st.configured ? `${st.host}:${st.port}${st.from_email ? ` · from ${st.from_email}` : ""}` : "Fill in the SMTP host, username and password below, then turn it on"}
+          </div>
+        </div>
+        <span className={clsx("ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold", status.cls)}>
+          <span className={clsx("w-2 h-2 rounded-full", status.dot)}/>{status.label}
+        </span>
+        <button className="btn-secondary btn-sm" disabled={!st.configured || checkMut.isPending} onClick={() => checkMut.mutate()}>
+          {checkMut.isPending ? "Checking…" : "Check connection"}
+        </button>
+      </div>
+      {st.enabled && st.connected === false && st.error && <p className="text-xs text-red-600">{st.error}</p>}
+      {st.checked_at && <p className="text-[11px] text-gray-400">Last checked {new Date(st.checked_at).toLocaleString()}</p>}
+      {st.server_wide && <p className="text-[11px] text-gray-400">Using the server's own mail settings. Fill in your own below to control it here.</p>}
+    </div>
+  )
+}
+
 export default function SystemSettingsPage() {
   const qc = useQueryClient()
   const { user } = useAuthStore()
@@ -54,7 +113,7 @@ export default function SystemSettingsPage() {
 
   const updateMut = useMutation({
     mutationFn: ({ key, value }) => settingsApi.update(key, value),
-    onSuccess: () => { toast.success("Setting updated"); qc.invalidateQueries({ queryKey: ["system-settings"] }); setEditingKey(null) },
+    onSuccess: () => { toast.success("Setting updated"); qc.invalidateQueries({ queryKey: ["system-settings"] }); qc.invalidateQueries({ queryKey: ["email-status"] }); setEditingKey(null) },
     onError: err => toast.error(apiErrorMessage(err, "Failed to update setting"))
   })
   const updateCompanyMut = useMutation({
@@ -71,8 +130,8 @@ export default function SystemSettingsPage() {
   })
   const testEmailMut = useMutation({
     mutationFn: email => settingsApi.testEmail(email),
-    onSuccess: res => toast.success(res.data?.message || "Test email sent"),
-    onError: err => toast.error(apiErrorMessage(err, "Failed to send test email"))
+    onSuccess: res => { toast.success(res.data?.message || "Test email sent"); qc.invalidateQueries({ queryKey: ["email-status"] }) },
+    onError: err => { toast.error(apiErrorMessage(err, "Failed to send test email")); qc.invalidateQueries({ queryKey: ["email-status"] }) }
   })
 
   const [companyForm, setCompanyForm] = useState({})
@@ -214,6 +273,7 @@ export default function SystemSettingsPage() {
           {!["COMPANY","DROPDOWNS_ICT"].includes(activeTab) && (
             <div className="card">
               <h3 className="font-semibold text-gray-700 mb-5">{CATEGORIES.find(c=>c.key===activeTab)?.label} Settings</h3>
+              {activeTab === "EMAIL" && <EmailStatusCard/>}
               {activeTab === "EMAIL" && (
                 <div className="flex items-center gap-2 mb-5 p-4 bg-primary-50 rounded-xl border border-primary-100">
                   <Send size={15} className="text-primary-600 flex-shrink-0"/>
@@ -229,7 +289,7 @@ export default function SystemSettingsPage() {
                 <p className="text-sm text-gray-400 text-center py-8">No settings in this category</p>
               ) : (
                 <div className="space-y-4">
-                  {settings.map(s => (
+                  {settings.filter(s => s.setting_key !== "email_enabled").map(s => (
                     <div key={s.setting_id} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm text-gray-700">{s.label}</div>

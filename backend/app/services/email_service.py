@@ -29,7 +29,12 @@ async def _get_smtp_config(company_id: int) -> dict:
             await conn.close()
     except Exception:
         cfg = {}
+    # A company with its own mail server uses its on/off switch; with none, the server-wide
+    # SMTP_* settings (if any) apply and count as switched on.
+    own = bool((cfg.get("smtp_host") or "").strip())
+    enabled = (cfg.get("email_enabled", "false").lower() == "true") if own else bool(settings.SMTP_HOST)
     return {
+        "own":        own,
         "host":       cfg.get("smtp_host")      or settings.SMTP_HOST     or "",
         "port":       int(cfg.get("smtp_port") or settings.SMTP_PORT     or 587),
         "user":       cfg.get("smtp_user")      or settings.SMTP_USER     or "",
@@ -37,12 +42,42 @@ async def _get_smtp_config(company_id: int) -> dict:
         "from_email": cfg.get("smtp_from_email") or settings.SMTP_FROM   or "",
         "from_name":  cfg.get("smtp_from_name") or "TeleBid Enterprise",
         "use_tls":    (cfg.get("smtp_use_tls","true")).lower()=="true",
-        "enabled":    (cfg.get("email_enabled","false")).lower()=="true",
+        "enabled":    enabled,
     }
 
+def _smtp_kwargs(smtp: dict) -> dict:
+    # Port 465 is TLS from the first byte; other ports (587) upgrade with STARTTLS.
+    implicit = smtp["port"] == 465
+    return dict(hostname=smtp["host"], port=smtp["port"], username=smtp["user"], password=smtp["password"],
+                use_tls=implicit, start_tls=smtp["use_tls"] and not implicit, timeout=20)
+
 async def smtp_configured(company_id: int) -> bool:
+    """Email can be sent: a mail server is filled in and email sending is switched on."""
     smtp = await _get_smtp_config(company_id)
-    return bool(smtp["host"] and smtp["user"])
+    return bool(smtp["host"] and smtp["user"] and smtp["enabled"])
+
+async def check_smtp(company_id: int) -> dict:
+    """Connects and signs in to the mail server without sending anything."""
+    smtp = await _get_smtp_config(company_id)
+    if not (smtp["host"] and smtp["user"]):
+        return {"connected": False, "error": "Fill in the SMTP host and username first"}
+    client = aiosmtplib.SMTP(**{k: v for k, v in _smtp_kwargs(smtp).items() if k not in ("username", "password")})
+    try:
+        await client.connect()
+        await client.login(smtp["user"], smtp["password"])
+        return {"connected": True, "error": None}
+    except aiosmtplib.SMTPAuthenticationError:
+        return {"connected": False, "error": "The mail server rejected the username or password (for Gmail or Outlook, use an app password)"}
+    except (aiosmtplib.SMTPConnectError, aiosmtplib.SMTPTimeoutError, OSError):
+        return {"connected": False, "error": f"Couldn't reach {smtp['host']} on port {smtp['port']} — check the host and port (use 587, not 25)"}
+    except aiosmtplib.SMTPException as e:
+        return {"connected": False, "error": f"The mail server refused the connection: {e}"}
+    finally:
+        try:
+            if client.is_connected:
+                await client.quit()
+        except Exception:
+            pass
 
 async def send_email(to: str, subject: str, body_html: str, body_text: str = "", company_id: int = 1,
                      attachments: list = None) -> bool:
@@ -56,6 +91,9 @@ async def send_email(to: str, subject: str, body_html: str, body_text: str = "",
                 "use_tls":settings.SMTP_TLS,"enabled":bool(settings.SMTP_HOST)}
     if not smtp["host"] or not smtp["user"]:
         logger.info(f"SMTP not configured — skipping email to {to}: {subject}")
+        return False
+    if not smtp["enabled"]:
+        logger.info(f"Email sending is switched off — skipping email to {to}: {subject}")
         return False
     try:
         body = MIMEMultipart("alternative")
@@ -76,9 +114,7 @@ async def send_email(to: str, subject: str, body_html: str, body_text: str = "",
         msg["Subject"] = subject
         msg["From"] = f"{smtp['from_name']} <{smtp['from_email'] or smtp['user']}>"
         msg["To"] = to
-        await aiosmtplib.send(msg, hostname=smtp["host"], port=smtp["port"],
-            username=smtp["user"], password=smtp["password"],
-            use_tls=False, start_tls=smtp["use_tls"])
+        await aiosmtplib.send(msg, **_smtp_kwargs(smtp))
         logger.info(f"Email sent to {to}: {subject}")
         return True
     except Exception as e:

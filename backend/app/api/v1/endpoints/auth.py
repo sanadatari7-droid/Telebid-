@@ -10,6 +10,7 @@ from app.middleware.auth import require_roles, CurrentUser
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal, Optional
 from app.services.plan import price_per_user, require_free_seat
+from app.api.v1.endpoints.settings import ensure_email_settings
 from datetime import datetime, timezone, timedelta
 import secrets, re
 
@@ -380,6 +381,7 @@ async def signup(body: TenantSignupRequest, conn=Depends(get_db)):
                 ($1,'otp_enabled','true','BOOLEAN','SECURITY','Enable OTP Login'),
                 ($1,'password_rotation_days','30','NUMBER','SECURITY','Password Rotation (Days)')
             ON CONFLICT DO NOTHING""", company_id)
+        await ensure_email_settings(conn, company_id)
 
     try:
         await execute(conn,

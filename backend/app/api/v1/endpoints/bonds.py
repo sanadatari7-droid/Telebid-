@@ -181,7 +181,7 @@ async def _send_to_office(conn, bond_id: int, company_id: int) -> dict:
     if not cfg.get("office_email"):
         error = "No issuance office email is set (Company Settings → Bid Bond Approval), so the request wasn't sent"
     elif not await smtp_configured(company_id):
-        error = "Email isn't set up yet (System Settings → Email), so the request wasn't sent"
+        error = "Email isn't set up or is switched off (System Settings → Email), so the request wasn't sent"
     else:
         bond = await fetch_one(conn, """
             SELECT b.*, COALESCE(o.opp_number, ri.rfp_number) AS opp_number,

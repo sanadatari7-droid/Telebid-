@@ -2151,3 +2151,15 @@ ALTER TABLE companies
 ALTER TABLE companies
     ADD COLUMN IF NOT EXISTS logo_data BYTEA,
     ADD COLUMN IF NOT EXISTS logo_type VARCHAR(30);
+
+-- Every company gets its own email settings (they used to exist only for company 1).
+INSERT INTO system_settings (company_id, setting_key, setting_value, setting_type, category, label)
+SELECT c.company_id, d.k, d.v, d.t, 'EMAIL', d.l
+FROM companies c CROSS JOIN (VALUES
+    ('smtp_host', '', 'TEXT', 'SMTP Host'), ('smtp_port', '587', 'TEXT', 'SMTP Port'),
+    ('smtp_user', '', 'TEXT', 'SMTP Username'), ('smtp_password', '', 'SECRET', 'SMTP Password'),
+    ('smtp_from_name', 'TeleBid Enterprise', 'TEXT', 'From Name'), ('smtp_from_email', '', 'TEXT', 'From Email'),
+    ('smtp_use_tls', 'true', 'BOOL', 'Use TLS'), ('email_enabled', 'false', 'BOOL', 'Enable Email')
+) AS d(k, v, t, l)
+ON CONFLICT (company_id, setting_key) DO NOTHING;
+UPDATE system_settings SET setting_type='SECRET' WHERE setting_key='smtp_password' AND setting_type <> 'SECRET';
